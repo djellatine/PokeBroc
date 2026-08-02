@@ -1,0 +1,243 @@
+@import "tailwindcss";
+
+/**
+ * Tableau de bord sombre et dense.
+ *
+ * Le fil est fait pour être balayé, pas contemplé : la hiérarchie repose sur
+ * trois niveaux de fond très proches, une seule couleur d'accent, et deux
+ * couleurs sémantiques réservées à l'écart à la cote. Tout le reste est du gris.
+ */
+
+:root {
+  /* Fonds, du plus profond au plus élevé. */
+  --bg: #080a0e;
+  --panel: #0e1116;
+  --panel-2: #151920;
+  --panel-3: #1c212a;
+
+  /* Traits. `line` sépare, `line-strong` délimite un élément actif. */
+  --line: #1e232d;
+  --line-strong: #2f3644;
+
+  /* Textes, du plus lisible au plus discret. */
+  --text: #eceef4;
+  --dim: #98a1b3;
+  --faint: #646c7d;
+
+  --accent: #ffc61a;
+  --accent-strong: #ffd451;
+  /* Texte posé sur un aplat d'accent. */
+  --accent-ink: #1c1500;
+
+  /* Sémantique : bon marché / cher, réservé à l'écart à la cote. */
+  --good: #38d07f;
+  --bad: #ff6b6b;
+  /* Nouveauté. Volontairement distinct de l'accent, qui sert déjà à la marque. */
+  --new: #8b6dff;
+
+  --radius: 10px;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-panel-3: var(--panel-3);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-text: var(--text);
+  --color-dim: var(--dim);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-ink: var(--accent-ink);
+  --color-good: var(--good);
+  --color-bad: var(--bad);
+  --color-new: var(--new);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans), system-ui, sans-serif;
+  /* Les prix et les pourcentages sont lus en colonne : ils doivent s'aligner. */
+  font-variant-numeric: tabular-nums;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+/**
+ * Anneau de focus unique pour tout le site. Le style par défaut du navigateur
+ * disparaît sous les fonds sombres, et chaque composant le redéfinissait à sa
+ * façon — ou l'oubliait.
+ */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ------------------------------------------------------------- primitives */
+
+/** Panneau : la surface de base de tous les blocs. */
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+/**
+ * Étiquette de section. Petites capitales espacées : lisible à 10 px, et
+ * suffisamment différent du corps de texte pour ne pas avoir à grossir.
+ */
+.eyebrow {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+/** Pastille compacte : état, extension, signal. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+/** Contrôle interactif : bouton de barre d'outils, sélecteur, bascule. */
+.control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--dim);
+  font-size: 13px;
+  transition:
+    border-color 0.15s,
+    color 0.15s,
+    background-color 0.15s;
+}
+
+.control:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+
+.control:disabled {
+  opacity: 0.5;
+}
+
+/** Contrôle enclenché : un filtre actif doit se voir sans lire son libellé. */
+.control[aria-pressed="true"],
+.control[data-active="true"] {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+
+/* ------------------------------------------------------------ animations */
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-rise {
+  animation: rise 0.22s ease-out both;
+}
+
+@keyframes sheen {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/** Squelette de chargement : un balayage, pas un clignotement. */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--panel-2);
+}
+
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--panel-3) 80%, transparent),
+    transparent
+  );
+  animation: sheen 1.4s infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-rise,
+  .skeleton::after {
+    animation: none;
+  }
+}
+
+/**
+ * Affordance révélée au survol — mais toujours visible là où il n'y a pas de
+ * survol. Sur un téléphone, `group-hover` seul rend le bouton inatteignable.
+ */
+.reveal-on-hover {
+  opacity: 1;
+}
+
+@media (hover: hover) {
+  .reveal-on-hover {
+    opacity: 0;
+  }
+
+  .group:hover .reveal-on-hover,
+  .reveal-on-hover:focus-visible {
+    opacity: 1;
+  }
+}
+
+/**
+ * Safari iOS zoome sur le formulaire dès qu'un champ affiche moins de 16 px,
+ * et ne dézoome jamais. On force la taille sur mobile uniquement.
+ */
+@media (max-width: 640px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
