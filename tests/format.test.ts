@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { age, euro, percent, plural } from "../lib/format.ts";
+import { age, countdown, euro, percent, plural } from "../lib/format.ts";
 
 const NOW = 1_700_000_000_000;
 const MINUTE = 60_000;
@@ -49,6 +49,26 @@ describe("age", () => {
     // de laisser croire à une annonce publiée à l'instant.
     assert.equal(age(null, NOW), null);
     assert.equal(age(0, NOW), null);
+  });
+});
+
+describe("countdown", () => {
+  it("choisit l'unité selon le temps restant", () => {
+    assert.equal(countdown(NOW + 5 * MINUTE, NOW), "5 min");
+    assert.equal(countdown(NOW + 3 * HOUR, NOW), "3 h");
+    assert.equal(countdown(NOW + 4 * DAY, NOW), "4 j");
+  });
+
+  it("se tait sur une échéance passée", () => {
+    // L'instantané du fil peut avoir dix minutes : une enchère terminée entre
+    // temps ne doit pas afficher « il reste −3 min ».
+    assert.equal(countdown(NOW - MINUTE, NOW), null);
+    assert.equal(countdown(NOW, NOW), null);
+  });
+
+  it("n'invente rien sans échéance", () => {
+    assert.equal(countdown(null, NOW), null);
+    assert.equal(countdown(0, NOW), null);
   });
 });
 

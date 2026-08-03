@@ -5,9 +5,12 @@ import Link from "next/link";
 import { clearNewBadges } from "@/app/actions/favorites";
 import CollectionStrip, { type CardCount } from "@/components/CollectionStrip";
 import OfferRow from "@/components/OfferRow";
+import OfferTile from "@/components/OfferTile";
+import { useFrenchOnly } from "@/components/useFrenchOnly";
 import { usePersisted } from "@/components/usePersisted";
 import type { FeedCard, FeedItem, Snapshot } from "@/lib/feed";
 import { percent, plural } from "@/lib/format";
+import { isForeignListing } from "@/lib/language";
 import { STRONG_SCORE, WIDE_SCORE } from "@/lib/match";
 import type { FavoriteCard } from "@/lib/store";
 
@@ -58,6 +61,34 @@ const DEFAULT_FILTERS: Filters = {
 
 const FILTERS_KEY = "pokebroc:filtres";
 
+/* ---------------------------------------------------------------- affichage */
+
+type View = "list" | "grid";
+
+const VIEWS: { value: View; label: string; hint: string }[] = [
+  { value: "list", label: "Liste", hint: "Une annonce par ligne, prix alignés" },
+  { value: "grid", label: "Grille", hint: "Vignettes : les photos en grand" },
+];
+
+/**
+ * L'affichage est rangé à part des filtres, et pas seulement par propreté : les
+ * filtres sont une dépendance du calcul du fil, alors que la forme des lignes
+ * n'y change rien. Mélangés, chaque bascule Liste/Grille retrierait deux cents
+ * annonces pour rien.
+ */
+const DEFAULT_DISPLAY: { view: View } = { view: "list" };
+
+const DISPLAY_KEY = "pokebroc:affichage";
+
+/** Conteneur du fil et hauteur des squelettes, selon l'affichage retenu. */
+const LAYOUT: Record<View, { list: string; skeleton: string }> = {
+  list: { list: "flex flex-col gap-2", skeleton: "h-[4.75rem]" },
+  grid: {
+    list: "grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5",
+    skeleton: "h-72",
+  },
+};
+
 /**
  * Annonces affichées par carte quand le fil les mélange toutes. Sans ce
  * plafond, une carte très représentée sur Vinted occupe tout l'écran et les
@@ -90,6 +121,9 @@ export default function Dashboard({
   const [settled, setSettled] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [filters, updateFilters] = usePersisted(FILTERS_KEY, DEFAULT_FILTERS);
+  const [display, updateDisplay] = usePersisted(DISPLAY_KEY, DEFAULT_DISPLAY);
+  // Piloté depuis le drapeau de l'en-tête, via le magasin de `usePersisted`.
+  const [frenchOnly] = useFrenchOnly();
   const [selected, setSelected] = useState<string | null>(null);
   const [limit, setLimit] = useState(PAGE_SIZE);
   const [now, setNow] = useState(serverNow);
@@ -135,12 +169,12 @@ export default function Dashboard({
           });
           const data = (await res.json()) as Snapshot & { error?: string };
           if (controller.signal.aborted) return;
-          if (!res.ok) throw new Error(data.error ?? "Recherche Vinted impossible.");
+          if (!res.ok) throw new Error(data.error ?? "Recherche d’annonces impossible.");
           setSnapshots((current) => ({ ...current, [cardId]: data }));
         } catch (err) {
           if (controller.signal.aborted || (err as Error).name === "AbortError") return;
           failures += 1;
-          setError(err instanceof Error ? err.message : "Recherche Vinted impossible.");
+          setError(err instanceof Error ? err.message : "Recherche d’annonces impossible.");
         } finally {
           if (!controller.signal.aborted) {
             setSettled((current) => [...current, cardId]);
@@ -164,16 +198,29 @@ export default function Dashboard({
     return byId;
   }, [snapshots]);
 
+  /**
+   * Une place de marché muette pendant que l'autre répond. Le fil reste utile,
+   * donc ce n'est pas une erreur — mais le taire laisserait croire que les
+   * cartes n'ont pas d'annonces là-bas, alors qu'on n'a pas pu regarder.
+   */
+  const partial = useMemo(() => {
+    const messages = new Set<string>();
+    for (const snapshot of Object.values(snapshots)) {
+      if (snapshot.partial) messages.add(snapshot.partial);
+    }
+    return [...messages];
+  }, [snapshots]);
+
   const threshold = filters.wide ? WIDE_SCORE : STRONG_SCORE;
   const maxPrice = Number.parseFloat(filters.maxPrice);
   const hasMaxPrice = Number.isFinite(maxPrice) && maxPrice > 0;
 
   /** Annonces retenues, dédoublonnées et triées. Les compteurs en découlent. */
-  const { rows, counts, hiddenByThreshold, stats } = useMemo(() => {
+  const { rows, counts, hiddenByThreshold, hiddenByLanguage, stats } = useMemo(() => {
     const followed = new Set(favorites.map((favorite) => favorite.cardId));
 
     // La même annonce peut remonter sur deux cartes : on garde la meilleure note.
-    const best = new Map<number, FeedItem>();
+    const best = new Map<string, FeedItem>();
     for (const snapshot of Object.values(snapshots)) {
       if (!followed.has(snapshot.card.cardId)) continue;
       for (const item of snapshot.items) {
@@ -183,6 +230,7 @@ export default function Dashboard({
     }
 
     let wideOnly = 0;
+    let foreign = 0;
     const kept = [...best.values()].filter((item) => {
       if (item.score < threshold) {
         if (item.score >= WIDE_SCORE) wideOnly += 1;
@@ -192,6 +240,12 @@ export default function Dashboard({
       if (filters.hideBulk && item.bulk) return false;
       if (filters.onlyNew && item.firstSeen <= newSince) return false;
       if (hasMaxPrice && (item.totalPrice ?? item.price ?? Infinity) > maxPrice) return false;
+      // En dernier, pour que le compteur ne recense que des annonces qui
+      // seraient effectivement visibles sans le drapeau.
+      if (frenchOnly && isForeignListing(item)) {
+        foreign += 1;
+        return false;
+      }
       return true;
     });
 
@@ -236,6 +290,7 @@ export default function Dashboard({
       rows,
       counts,
       hiddenByThreshold: wideOnly,
+      hiddenByLanguage: foreign,
       stats: {
         total: scoped.length,
         fresh: scoped.filter((item) => item.firstSeen > newSince).length,
@@ -243,10 +298,25 @@ export default function Dashboard({
         bestDeal: deviations.length > 0 ? Math.min(...deviations) : null,
       },
     };
-  }, [snapshots, favorites, threshold, filters, selected, newSince, hasMaxPrice, maxPrice]);
+  }, [
+    snapshots,
+    favorites,
+    threshold,
+    filters,
+    selected,
+    newSince,
+    hasMaxPrice,
+    maxPrice,
+    frenchOnly,
+  ]);
 
   const visible = rows.slice(0, limit);
   const loading = pending.length > 0;
+
+  // Normalisé plutôt que lu tel quel : la valeur vient de `localStorage`, et une
+  // clé inconnue ferait tomber l'indexation de `LAYOUT` sur `undefined`.
+  const view: View = display.view === "grid" ? "grid" : "list";
+  const layout = LAYOUT[view];
 
   function markSeen() {
     startTransition(async () => {
@@ -330,6 +400,8 @@ export default function Dashboard({
           </Toggle>
 
           <div className="ml-auto flex items-center gap-2">
+            <ViewSwitch value={view} onChange={(next) => updateDisplay({ view: next })} />
+
             {loading && (
               <span className="flex items-center gap-1.5 text-[11px] text-faint" aria-live="polite">
                 <span
@@ -356,6 +428,12 @@ export default function Dashboard({
           </p>
         )}
 
+        {partial.length > 0 && (
+          <p className="text-[11px] text-faint">
+            Fil incomplet — {partial.join(" · ")}
+          </p>
+        )}
+
         {!filters.wide && hiddenByThreshold > 0 && rows.length > 0 && (
           <p className="text-[11px] text-faint">
             {plural(hiddenByThreshold, "annonce")} ne citant que le nom{" "}
@@ -363,10 +441,23 @@ export default function Dashboard({
           </p>
         )}
 
+        {/* Affiché même quand le fil est vide : sans cette phrase, un filtre
+            posé depuis l’en-tête laisserait croire à une panne de collecte. */}
+        {frenchOnly && hiddenByLanguage > 0 && (
+          <p className="text-[11px] text-faint">
+            {plural(hiddenByLanguage, "annonce")} au titre étranger{" "}
+            {hiddenByLanguage > 1 ? "sont masquées" : "est masquée"} — le drapeau, en haut, lève le
+            filtre.
+          </p>
+        )}
+
         {rows.length === 0 && loading && (
-          <ul className="flex flex-col gap-2">
+          <ul className={layout.list}>
             {Array.from({ length: 8 }).map((_, index) => (
-              <li key={index} className="skeleton h-[4.75rem] rounded-lg border border-line" />
+              <li
+                key={index}
+                className={`skeleton rounded-lg border border-line ${layout.skeleton}`}
+              />
             ))}
           </ul>
         )}
@@ -383,12 +474,13 @@ export default function Dashboard({
 
         {rows.length > 0 && (
           <>
-            <ul className="flex flex-col gap-2">
+            <ul className={layout.list}>
               {visible.map((item) => {
                 const card = cards[item.cardId];
                 if (!card) return null;
+                const Offer = view === "grid" ? OfferTile : OfferRow;
                 return (
-                  <OfferRow
+                  <Offer
                     key={item.id}
                     item={item}
                     card={card}
@@ -447,6 +539,39 @@ function Toggle({
     >
       {children}
     </button>
+  );
+}
+
+/**
+ * Bascule d'affichage. Les deux libellés restent visibles plutôt qu'un bouton
+ * unique qui changerait de nom : ici l'état courant se lit sans avoir à deviner
+ * si l'étiquette décrit ce qu'on voit ou ce qu'on obtiendra en cliquant.
+ */
+function ViewSwitch({ value, onChange }: { value: View; onChange: (view: View) => void }) {
+  return (
+    <div
+      role="group"
+      aria-label="Affichage des annonces"
+      className="flex h-8 items-center gap-0.5 rounded-lg border border-line bg-panel-2 p-0.5"
+    >
+      {VIEWS.map((option) => {
+        const active = value === option.value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => onChange(option.value)}
+            aria-pressed={active}
+            title={option.hint}
+            className={`rounded-md px-2.5 py-1 text-[13px] leading-none transition ${
+              active ? "bg-accent/15 font-medium text-accent" : "text-faint hover:text-text"
+            }`}
+          >
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -527,7 +652,7 @@ function EmptyFeed({
           </button>
         </>
       ) : (
-        <p>Aucune annonce Vinted pour vos cartes en ce moment. Réessayez plus tard.</p>
+        <p>Aucune annonce Vinted ni eBay pour vos cartes en ce moment. Réessayez plus tard.</p>
       )}
     </div>
   );

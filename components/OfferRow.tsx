@@ -2,26 +2,70 @@
 
 import Link from "next/link";
 import { CONDITION_LABELS } from "@/lib/match";
-import { age, euro, percent } from "@/lib/format";
-import type { FeedCard, FeedItem } from "@/lib/feed";
+import { age, countdown, euro, percent, plural } from "@/lib/format";
+import type { FeedCard, FeedItem, Source } from "@/lib/feed";
 
 /**
- * Une annonce du fil, en ligne plutôt qu'en vignette.
+ * Une annonce du fil, en ligne.
  *
- * La grille de cartes obligeait à comparer de tête des prix dispersés sur cinq
- * colonnes. En ligne, les prix et les écarts s'alignent verticalement — et
+ * C'est l'affichage par défaut, parce qu'il répond à la question du fil : où
+ * est la bonne affaire ? Les prix et les écarts s'alignent verticalement, et
  * comme le corps du texte est en chiffres tabulaires, la colonne se lit d'un
- * seul balayage.
+ * seul balayage. `OfferTile` est l'autre moitié de la bascule, pour quand on
+ * cherche un état plutôt qu'un prix : là, c'est la photo qui compte.
  */
 
 /**
  * Trois paliers seulement. Un dégradé continu se lirait mal à cette taille, et
  * la question posée est binaire : est-ce que ça vaut le coup de cliquer ?
+ *
+ * Exporté : la vignette pose le même écart sur la photo, et deux échelles de
+ * couleur pour une même donnée se désynchroniseraient à la première retouche.
  */
-function deviationStyle(vsMarket: number): string {
+export function deviationStyle(vsMarket: number): string {
   if (vsMarket <= -15) return "border-good/40 bg-good/15 text-good";
   if (vsMarket >= 20) return "border-bad/30 bg-bad/10 text-bad";
   return "border-line bg-panel-2 text-dim";
+}
+
+/**
+ * Provenance de l'annonce.
+ *
+ * Un point de couleur et du texte gris, plutôt qu'une pastille teintée : le
+ * vert et le rouge sont réservés à l'écart à la cote, et une troisième couleur
+ * pleine dans la même ligne entrerait en concurrence avec la seule information
+ * qui décide du clic. La provenance se consulte, elle ne s'annonce pas — mais
+ * elle doit se repérer sans lire, d'où le point.
+ *
+ * Exportée : la ligne et la vignette la posent toutes deux, et deux définitions
+ * pour une même donnée divergeraient à la première retouche.
+ */
+export const SOURCE_LABELS: Record<Source, string> = { vinted: "Vinted", ebay: "eBay" };
+
+const SOURCE_DOTS: Record<Source, string> = { vinted: "bg-teal-400", ebay: "bg-blue-400" };
+
+/**
+ * Les deux places de marché ne datent pas leurs annonces de la même façon :
+ * eBay publie une vraie date de mise en ligne, Vinted n'expose que
+ * l'horodatage de la photo. Le libellé le dit, plutôt que d'afficher une
+ * précision qu'on n'a pas.
+ */
+export function postedHint(source: Source): string {
+  return source === "ebay" ? "Mise en ligne" : "Mise en ligne (horodatage de la photo)";
+}
+
+/** Le supplément n'est pas de même nature : port chez eBay, frais de service chez Vinted. */
+export function feesLabel(source: Source): string {
+  return source === "ebay" ? "de port" : "de frais";
+}
+
+export function SourceChip({ source }: { source: Source }) {
+  return (
+    <span className="chip" title={`Annonce ${SOURCE_LABELS[source]}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${SOURCE_DOTS[source]}`} aria-hidden />
+      {SOURCE_LABELS[source]}
+    </span>
+  );
 }
 
 export default function OfferRow({
@@ -36,6 +80,7 @@ export default function OfferRow({
   now: number;
 }) {
   const posted = age(item.createdAt, now);
+  const remaining = item.auction ? countdown(item.endsAt, now) : null;
   const total = item.totalPrice ?? item.price;
   const fees =
     item.totalPrice !== null && item.price !== null ? item.totalPrice - item.price : null;
@@ -79,6 +124,7 @@ export default function OfferRow({
                 nouveau
               </span>
             )}
+            <SourceChip source={item.source} />
             {item.graded && <span className="chip border-sky-400/30 text-sky-300">gradée</span>}
             {item.bulk && <span className="chip">lot</span>}
           </div>
@@ -100,9 +146,18 @@ export default function OfferRow({
                 cote {euro(item.trend)}
               </span>
             )}
-            {posted && <span title="Mise en ligne (horodatage de la photo)">{posted}</span>}
+            {posted && <span title={postedHint(item.source)}>{posted}</span>}
             {item.favourites > 0 && <span>♥ {item.favourites}</span>}
             {item.promoted && <span>sponsorisée</span>}
+            {item.auction && (
+              <span
+                className="text-dim"
+                title="Enchère en cours : le prix affiché n’est pas un prix demandé, et n’est donc pas comparé à la cote."
+              >
+                enchère · {plural(item.bids, "offre")}
+                {remaining && ` · fin dans ${remaining}`}
+              </span>
+            )}
           </div>
         </div>
 
@@ -122,7 +177,7 @@ export default function OfferRow({
             <span className="block text-[15px] font-bold leading-tight">{euro(total)}</span>
             {fees !== null && fees > 0 && (
               <span className="block text-[10px] leading-tight text-faint">
-                dont {euro(fees)} de frais
+                dont {euro(fees)} {feesLabel(item.source)}
               </span>
             )}
           </span>

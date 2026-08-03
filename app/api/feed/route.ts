@@ -38,7 +38,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("[api/feed]", error);
     return Response.json(
-      { error: "Impossible d’interroger Vinted pour le moment." },
+      { error: "Impossible d’interroger Vinted ni eBay pour le moment." },
       { status: 502 },
     );
   }

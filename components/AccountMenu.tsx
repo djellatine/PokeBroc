@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { logout } from "@/app/actions/auth";
+import FrenchOnlyFlag from "@/components/FrenchOnlyFlag";
 import { getCurrentUser } from "@/lib/auth";
 
 /**
@@ -30,6 +31,11 @@ export default async function AccountMenu() {
 
   return (
     <div className="flex shrink-0 items-center gap-2 text-[13px]">
+      {/* Le drapeau est rendu ici plutôt que dans le layout : c'est le seul
+          endroit de l'en-tête qui sache déjà s'il y a quelqu'un de connecté, et
+          le filtre n'a pas de fil sur lequel s'appliquer pour un visiteur. */}
+      <FrenchOnlyFlag />
+
       <span className="hidden max-w-[18ch] truncate text-faint lg:block" title={user.email}>
         {user.email}
       </span>

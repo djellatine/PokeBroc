@@ -34,6 +34,23 @@ export function age(at: number | null | undefined, now = Date.now()): string | n
   return `${years} an${years > 1 ? "s" : ""}`;
 }
 
+/**
+ * Temps restant avant une échéance — la fin d'une enchère eBay.
+ *
+ * Rend `null` une fois l'échéance passée : l'instantané peut avoir jusqu'à dix
+ * minutes, et « il reste −3 min » ne veut rien dire. Volontairement grossier au
+ * delà de l'heure, comme `age` : c'est un ordre de grandeur, pas un chronomètre.
+ */
+export function countdown(at: number | null | undefined, now = Date.now()): string | null {
+  if (!at) return null;
+  const minutes = Math.round((at - now) / 60_000);
+  if (minutes <= 0) return null;
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} h`;
+  return `${Math.round(hours / 24)} j`;
+}
+
 /** Pluriel simple : `plural(2, "carte")` → « 2 cartes ». */
 export function plural(count: number, singular: string, plural = `${singular}s`): string {
   return `${count} ${count > 1 ? plural : singular}`;

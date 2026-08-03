@@ -54,12 +54,31 @@ function file(cardId: string): string {
 
 async function load(cardId: string): Promise<CardSightings> {
   const parsed = await readJson<Partial<CardSightings>>(file(cardId));
-  return { cardId, items: parsed?.items && typeof parsed.items === "object" ? parsed.items : {} };
+  const items = parsed?.items && typeof parsed.items === "object" ? parsed.items : {};
+  return { cardId, items: migrate(items) };
+}
+
+/**
+ * Les identifiants étaient les seuls numéros d'annonce Vinted, avant qu'eBay ne
+ * rejoigne le fil et n'impose un préfixe de provenance. Sans cette reprise, tout
+ * un historique deviendrait illisible d'un coup : chaque annonce déjà connue
+ * repasserait pour nouvelle, et le badge « nouveau » — dont tout l'intérêt est
+ * de ne pas se déclencher à tort — perdrait sa crédibilité au premier
+ * déploiement.
+ */
+function migrate(items: Record<string, Sighting>): Record<string, Sighting> {
+  return Object.fromEntries(
+    Object.entries(items).map(([key, sighting]) => [
+      /^\d+$/.test(key) ? `vinted:${key}` : key,
+      sighting,
+    ]),
+  );
 }
 
 /** Annonce telle qu'on la reçoit du fil, réduite à ce qu'on archive. */
 export interface SeenItem {
-  id: number;
+  /** Identifiant préfixé par la source : `vinted:123`, `ebay:v1|456|0`. */
+  id: string;
   price: number | null;
   strong: boolean;
 }
@@ -76,15 +95,15 @@ export async function recordSightings(
   cardId: string,
   items: SeenItem[],
   now = Date.now(),
-): Promise<Map<number, number>> {
-  const firstSeen = new Map<number, number>();
+): Promise<Map<string, number>> {
+  const firstSeen = new Map<string, number>();
   if (items.length === 0) return firstSeen;
 
   await serialize(`sightings:${cardId}`, async () => {
     const data = await load(cardId);
 
     for (const item of items) {
-      const key = String(item.id);
+      const key = item.id;
       const known = data.items[key];
       if (known) {
         known.last = now;

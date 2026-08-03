@@ -1,19 +1,23 @@
 /**
  * Instantanés du fil d'annonces, un fichier par carte.
  *
- * Avant, chaque chargement de page relançait une recherche Vinted par carte,
+ * Avant, chaque chargement de page relançait une recherche par carte,
  * sérialisées à 350 ms : vingt cartes suivies, c'était sept secondes d'attente
  * refaites à chaque visite, par chaque visiteur. Le travail est désormais fait
  * une fois toutes les dix minutes et rangé sur le disque ; la page se rend
  * depuis ce cache, et ne rafraîchit en arrière-plan que les cartes périmées.
  *
- * Les deux passes Vinted sont exécutées ici plutôt que sur demande du client :
- * `newest_first` ne sert pas qu'au tri « derniers ajouts », c'est aussi le seul
- * classement qui fasse remonter une annonce fraîche encore mal positionnée en
- * pertinence — donc la condition d'un badge « nouveau » fiable.
+ * Deux passes par place de marché, exécutées ici plutôt que sur demande du
+ * client : le tri par nouveauté ne sert pas qu'au tri « derniers ajouts », c'est
+ * aussi le seul classement qui fasse remonter une annonce fraîche encore mal
+ * positionnée en pertinence — donc la condition d'un badge « nouveau » fiable.
+ *
+ * Vinted et eBay sont collectés indépendamment et fusionnés : une panne d'un
+ * côté ne doit pas vider le fil de l'autre, ni empêcher d'écrire l'instantané.
  */
 
 import path from "node:path";
+import { isConfigured as hasEbay, searchEbay, type EbayItem } from "./ebay";
 import { DATA_DIR, readJson, safeFileName, serialize, writeJson } from "./json-file";
 import {
   bestQuery,
@@ -22,12 +26,12 @@ import {
   WIDE_SCORE,
   STRONG_SCORE,
   type Condition,
-  type ScoredItem,
+  type Scored,
 } from "./match";
 import { recordSightings } from "./sightings";
 import type { FavoriteCard } from "./store";
-import { getCard } from "./tcgdex";
-import { searchVinted } from "./vinted";
+import { getCard, type CardDetail } from "./tcgdex";
+import { searchVinted, type VintedItem } from "./vinted";
 
 const DIR = path.join(DATA_DIR, "feed");
 
@@ -59,8 +63,12 @@ export interface FeedCard {
  * le réseau jusqu'au navigateur, et les champs inutilisés y coûteraient deux
  * fois.
  */
+export type Source = "vinted" | "ebay";
+
 export interface FeedItem {
-  id: number;
+  /** Préfixé par la source : deux places de marché numérotent chacune de son côté. */
+  id: string;
+  source: Source;
   cardId: string;
   title: string;
   url: string;
@@ -70,14 +78,24 @@ export interface FeedItem {
   condition: Condition;
   promoted: boolean;
   favourites: number;
-  /** Mise en ligne (horodatage de la photo), en ms epoch. */
+  /** Mise en ligne, en ms epoch. Date réelle sur eBay, horodatage de la photo sur Vinted. */
   createdAt: number | null;
-  seller: string | null;
   score: number;
   graded: boolean;
   bulk: boolean;
   trend: number | null;
   vsMarket: number | null;
+  /**
+   * Pays de l'objet, quand la source le déclare — eBay le fait, Vinted non.
+   * C'est le seul signal fiable de provenance : le filtre « français
+   * uniquement » s'y fie avant de retomber sur la langue du titre.
+   */
+  country: string | null;
+  /** Enchère en cours : le prix affiché n'est pas un prix demandé. */
+  auction: boolean;
+  bids: number;
+  /** Fin de l'enchère, en ms epoch. */
+  endsAt: number | null;
   /** Première fois que *nous* avons croisé cette annonce, en ms epoch. */
   firstSeen: number;
 }
@@ -88,8 +106,13 @@ export interface Snapshot {
   at: number;
   query: string;
   items: FeedItem[];
-  /** Renseigné quand la collecte a échoué ; l'instantané précédent est conservé. */
+  /** Renseigné quand *toutes* les places de marché ont échoué ; l'instantané précédent est conservé. */
   error?: string;
+  /**
+   * Renseigné quand une seule place de marché a échoué. L'instantané est
+   * valide — `isFresh` le laisse donc passer — mais incomplet, et le fil le dit.
+   */
+  partial?: string;
 }
 
 function file(cardId: string): string {
@@ -106,7 +129,15 @@ export function isFresh(
 
 export async function readSnapshot(cardId: string): Promise<Snapshot | null> {
   const snapshot = await readJson<Snapshot>(file(cardId));
-  return snapshot?.items && Array.isArray(snapshot.items) ? snapshot : null;
+  if (!snapshot?.items || !Array.isArray(snapshot.items)) return null;
+
+  // Instantané écrit avant l'arrivée d'eBay : ses annonces n'ont pas de
+  // provenance, donc pas de pastille et un identifiant qui ne correspond plus à
+  // rien dans le journal. On le traite comme absent — la carte sera recollectée
+  // au prochain passage, ce qui coûte une recherche et remet tout d'aplomb.
+  if (snapshot.items.some((item) => item.source === undefined)) return null;
+
+  return snapshot;
 }
 
 /** Instantanés disponibles, dans l'ordre de la collection. Aucune requête réseau. */
@@ -129,9 +160,15 @@ export function staleCardIds(
 
 /* ---------------------------------------------------------------- collecte */
 
-function toFeedItem(item: ScoredItem, cardId: string, firstSeen: number): FeedItem {
+/** Annonce prête pour le fil, avant qu'on sache depuis quand on la connaît. */
+type PendingItem = Omit<FeedItem, "firstSeen">;
+
+/** Champs communs aux deux places de marché, une fois l'annonce notée. */
+function common(
+  item: Scored<VintedItem> | Scored<EbayItem>,
+  cardId: string,
+): Omit<PendingItem, "id" | "source" | "country" | "auction" | "bids" | "endsAt"> {
   return {
-    id: item.id,
     cardId,
     title: item.title,
     url: item.url,
@@ -142,14 +179,80 @@ function toFeedItem(item: ScoredItem, cardId: string, firstSeen: number): FeedIt
     promoted: item.promoted,
     favourites: item.favourites,
     createdAt: item.createdAt,
-    seller: item.seller.login,
     score: item.match.score,
     graded: item.match.graded,
     bulk: item.match.bulk,
     trend: item.trend,
     vsMarket: item.vsMarket,
-    firstSeen,
   };
+}
+
+function fromVinted(item: Scored<VintedItem>, cardId: string): PendingItem {
+  return {
+    ...common(item, cardId),
+    id: `vinted:${item.id}`,
+    source: "vinted",
+    // Le catalogue Vinted ne dit ni le pays du vendeur ni celui de l'objet.
+    country: null,
+    auction: false,
+    bids: 0,
+    endsAt: null,
+  };
+}
+
+function fromEbay(item: Scored<EbayItem>, cardId: string): PendingItem {
+  return {
+    ...common(item, cardId),
+    id: `ebay:${item.id}`,
+    source: "ebay",
+    country: item.country,
+    auction: item.auction,
+    bids: item.bids,
+    endsAt: item.endsAt,
+    // Une enchère en cours n'a pas de prix demandé : à trois jours de la fin,
+    // un Dracaufeu à 1 € afficherait −99 % et raflerait toutes les « meilleures
+    // affaires », exactement comme le faisaient les reproductions à 3 €. On
+    // laisse donc l'écart vide plutôt que faux ; le fil affiche l'enchère et son
+    // nombre d'offres, et le lecteur juge.
+    vsMarket: item.auction ? null : item.vsMarket,
+  };
+}
+
+/**
+ * Deux passes sur une place de marché, fusionnées.
+ *
+ * Rend toujours une liste, même vide : l'erreur éventuelle est retournée à
+ * l'appelant plutôt que propagée, pour qu'une place de marché en panne
+ * n'emporte pas l'autre.
+ */
+async function collect(
+  source: Source,
+  card: CardDetail,
+  query: string,
+): Promise<{ items: PendingItem[]; error: string | null }> {
+  try {
+    // Les deux passes partent ensemble ; les clients les sérialisent de toute
+    // façon, mais on n'attend pas la première pour poster la seconde.
+    if (source === "vinted") {
+      const [relevant, fresh] = await Promise.all([
+        searchVinted({ query, order: "relevance", perPage: 48 }),
+        searchVinted({ query, order: "newest_first", perPage: 48 }),
+      ]);
+      const scored = scoreAll([...relevant.items, ...fresh.items], card);
+      return { items: scored.map((item) => fromVinted(item, card.id)), error: null };
+    }
+
+    const [relevant, fresh] = await Promise.all([
+      searchEbay({ query, order: "best_match", perPage: 50 }),
+      searchEbay({ query, order: "newly_listed", perPage: 50 }),
+    ]);
+    const scored = scoreAll([...relevant.items, ...fresh.items], card);
+    return { items: scored.map((item) => fromEbay(item, card.id)), error: null };
+  } catch (error) {
+    const label = source === "vinted" ? "Vinted" : "eBay";
+    const message = error instanceof Error ? error.message : `Recherche ${label} impossible.`;
+    return { items: [], error: `${label} : ${message}` };
+  }
 }
 
 /**
@@ -188,58 +291,63 @@ export async function refreshCard(favorite: FavoriteCard, now = Date.now()): Pro
 
     const query = bestQuery(card);
 
-    try {
-      // Les deux passes partent ensemble ; `lib/vinted.ts` les sérialise de
-      // toute façon, mais on n'attend pas la première pour poster la seconde.
-      const [relevant, fresh] = await Promise.all([
-        searchVinted({ query, order: "relevance", perPage: 48 }),
-        searchVinted({ query, order: "newest_first", perPage: 48 }),
-      ]);
+    // Sans clés eBay, le site fonctionne sur Vinted seul plutôt que de signaler
+    // une erreur de collecte à chaque carte.
+    const sources: Source[] = hasEbay() ? ["vinted", "ebay"] : ["vinted"];
+    const collected = await Promise.all(sources.map((source) => collect(source, card, query)));
 
-      // La même annonce revient dans les deux passes : on garde la meilleure note.
-      const best = new Map<number, ScoredItem>();
-      for (const item of [...scoreAll(relevant.items, card), ...scoreAll(fresh.items, card)]) {
-        const known = best.get(item.id);
-        if (!known || item.match.score > known.match.score) best.set(item.id, item);
-      }
+    const errors = collected.map((result) => result.error).filter((msg) => msg !== null);
 
-      const kept = [...best.values()]
-        .filter((item) => item.match.score >= WIDE_SCORE)
-        .sort((a, b) => b.match.score - a.match.score)
-        .slice(0, MAX_PER_CARD);
-
-      const firstSeen = await recordSightings(
-        card.id,
-        kept.map((item) => ({
-          id: item.id,
-          price: item.totalPrice ?? item.price,
-          strong: item.match.score >= STRONG_SCORE,
-        })),
-        now,
-      );
-
-      const snapshot: Snapshot = {
-        card: feedCard,
-        at: now,
-        query,
-        items: kept.map((item) => toFeedItem(item, card.id, firstSeen.get(item.id) ?? now)),
-      };
-      await writeJson(file(card.id), snapshot);
-      return snapshot;
-    } catch (error) {
-      // Vinted en panne ne doit pas vider le fil : on republie les annonces
-      // précédentes en signalant que la collecte a échoué.
-      const message = error instanceof Error ? error.message : "Recherche Vinted impossible.";
+    // Tout est en panne : on republie l'instantané précédent, qui vaut mieux
+    // qu'un fil vide, en signalant l'échec.
+    if (errors.length === sources.length) {
       const failed: Snapshot = {
         card: feedCard,
         at: now,
         query,
         items: existing?.items ?? [],
-        error: message,
+        error: errors.join(" · "),
       };
       await writeJson(file(card.id), failed);
       return failed;
     }
+
+    // La même annonce revient dans les deux passes : on garde la meilleure note.
+    // Les identifiants étant préfixés par la source, Vinted et eBay ne peuvent
+    // pas se recouvrir ici.
+    const best = new Map<string, PendingItem>();
+    for (const item of collected.flatMap((result) => result.items)) {
+      const known = best.get(item.id);
+      if (!known || item.score > known.score) best.set(item.id, item);
+    }
+
+    const kept = [...best.values()]
+      .filter((item) => item.score >= WIDE_SCORE)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, MAX_PER_CARD);
+
+    const firstSeen = await recordSightings(
+      card.id,
+      kept.map((item) => ({
+        id: item.id,
+        price: item.totalPrice ?? item.price,
+        strong: item.score >= STRONG_SCORE,
+      })),
+      now,
+    );
+
+    const snapshot: Snapshot = {
+      card: feedCard,
+      at: now,
+      query,
+      items: kept.map((item) => ({ ...item, firstSeen: firstSeen.get(item.id) ?? now })),
+      // Une seule place de marché en panne : le fil reste servi par l'autre, et
+      // l'instantané reste daté de maintenant — le signaler sans le traiter
+      // comme un échec de collecte, sinon la carte serait rejouée en boucle.
+      ...(errors.length > 0 ? { partial: errors.join(" · ") } : {}),
+    };
+    await writeJson(file(card.id), snapshot);
+    return snapshot;
   });
 }
 

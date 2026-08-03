@@ -38,11 +38,11 @@ function Landing() {
         <h1 className="text-3xl font-bold leading-tight tracking-tight sm:text-5xl">
           Vos cartes Pokémon,
           <br />
-          <span className="text-accent">leurs bonnes affaires sur Vinted.</span>
+          <span className="text-accent">leurs bonnes affaires sur Vinted et eBay.</span>
         </h1>
         <p className="mx-auto mt-4 max-w-xl text-sm leading-relaxed text-dim sm:text-base">
-          Épinglez les cartes que vous cherchez. Toutes leurs annonces Vinted arrivent dans un fil
-          unique, comparées à la cote Cardmarket, les nouveautés en tête.
+          Épinglez les cartes que vous cherchez. Toutes leurs annonces Vinted et eBay arrivent dans
+          un fil unique, comparées à la cote Cardmarket, les nouveautés en tête.
         </p>
 
         <div className="mt-7 flex flex-wrap justify-center gap-2.5">
@@ -61,11 +61,18 @@ function Landing() {
         </div>
       </div>
 
-      <ul className="grid gap-3 sm:grid-cols-3">
+      {/* Quatre arguments : deux colonnes puis quatre, jamais trois — une
+          rangée de trois laisserait le quatrième seul sur sa ligne. */}
+      <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Argument title="La bonne carte, pas le bon mot">
           Sur Vinted, « Dracaufeu 4/102 » renvoie les mêmes mille annonces que « Dracaufeu ». Chaque
           annonce est renotée d’après son titre, et seules celles qui citent le nom <em>et</em> le
           numéro ou l’extension arrivent dans le fil.
+        </Argument>
+        <Argument title="Deux places de marché, un seul fil">
+          Vinted et eBay sont interrogés ensemble et leurs annonces fusionnées, dédoublonnées et
+          classées côte à côte. Chaque ligne porte sa provenance ; comparer les deux ne demande plus
+          d’ouvrir deux onglets.
         </Argument>
         <Argument title="Un prix, une référence">
           Chaque annonce affiche son écart avec la tendance Cardmarket. Une carte à −38 % se repère
@@ -97,7 +104,8 @@ function EmptyCollection() {
       <h1 className="text-2xl font-bold tracking-tight">Votre collection est vide</h1>
       <p className="mt-3 text-sm leading-relaxed text-dim">
         Tapez un nom de Pokémon dans la barre de recherche, en haut. Les cartes s’affichent en
-        aperçu — cliquez sur la bonne pour l’épingler, et ses annonces Vinted apparaîtront ici.
+        aperçu — cliquez sur la bonne pour l’épingler, et ses annonces Vinted et eBay apparaîtront
+        ici.
       </p>
       <FocusSearchButton className="mt-6 rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-accent-ink transition hover:bg-accent-strong">
         Chercher une carte

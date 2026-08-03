@@ -1,7 +1,10 @@
 /**
- * Évaluation de la pertinence d'une annonce Vinted vis-à-vis d'une carte précise.
+ * Évaluation de la pertinence d'une annonce vis-à-vis d'une carte précise.
  * Les vendeurs écrivent les titres à leur façon : on cherche des signaux
  * (nom, numéro imprimé, nom du set, gradation) plutôt qu'une correspondance stricte.
+ *
+ * La notation ne lit que le titre et le prix : elle vaut donc pour Vinted comme
+ * pour eBay, d'où le type d'entrée structurel plutôt qu'un `VintedItem`.
  */
 
 import type { CardDetail } from "./tcgdex";
@@ -28,13 +31,34 @@ export interface MatchSignals {
   score: number;
 }
 
-export interface ScoredItem extends VintedItem {
+/**
+ * Le minimum dont la notation a besoin. Vinted et eBay renvoient des objets très
+ * différents ; seuls ces champs-là entrent dans le calcul.
+ */
+export interface Scorable {
+  title: string;
+  promoted: boolean;
+  price: number | null;
+  totalPrice: number | null;
+  /**
+   * Gradation déclarée par la source elle-même. eBay la tient de la catégorie
+   * de l'annonce, ce qui vaut mieux que de chercher « psa » dans le titre :
+   * une gradée dont le titre ne le dit pas passerait sinon pour une carte
+   * brute, et son prix fausserait la comparaison à la cote. Absent sur Vinted,
+   * qui ne renseigne rien de tel — on retombe alors sur le titre.
+   */
+  graded?: boolean;
+}
+
+export type Scored<T> = T & {
   match: MatchSignals;
   /** Cote Cardmarket retenue pour la comparaison, en euros. */
   trend: number | null;
   /** Écart en % avec la cote Cardmarket, négatif = moins cher. */
   vsMarket: number | null;
-}
+};
+
+export type ScoredItem = Scored<VintedItem>;
 
 /** Lots et contenants : le prix ne se rapporte pas à une carte unique. */
 const BULK_WORDS = [
@@ -61,11 +85,26 @@ const GRADED_WORDS = ["psa", "pca", "beckett", "bgs", "cgc", "gradee", "gradees"
  */
 const FAKE_WORDS = ["custom", "proxy", "orica", "fanmade", "fan made", "replique", "contrefacon"];
 
+/**
+ * Le trait d'union devient une espace, il n'est pas effac\u00e9.
+ *
+ * Depuis \u00c9carlate & Violet, la carte fran\u00e7aise s'imprime \u00ab Latias-ex \u00bb \u2014 c'est
+ * le nom officiel, celui que publie TCGdex. Aucun vendeur ne l'\u00e9crit ainsi :
+ * les annonces, et jusqu'aux revendeurs sp\u00e9cialis\u00e9s, disent \u00ab Latias ex \u00bb. Le
+ * signal \u00ab nom \u00bb \u00e9chouait donc sur ce seul caract\u00e8re, faisant tomber la note de
+ * 11 \u00e0 7 \u2014 sous le seuil strict, donc un fil vide par d\u00e9faut sur environ 15 %
+ * des cartes des extensions r\u00e9centes, et pr\u00e9cis\u00e9ment les plus ch\u00e8res.
+ *
+ * L'effacer ne suffirait pas : \u00ab latiasex \u00bb ne se retrouve pas davantage dans
+ * \u00ab latias ex \u00bb. Il faut que les deux graphies convergent, donc une espace. Les
+ * tirets longs sont inclus parce que les titres d'annonces en sont friands.
+ */
 export function normalize(value: string): string {
   return value
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[-\u2010\u2011\u2012\u2013\u2014]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -109,7 +148,7 @@ function setKeywords(setName: string): string[] {
     .filter((word) => word.length >= 4 && !stop.has(word));
 }
 
-export function scoreItem(item: VintedItem, card: CardDetail): ScoredItem {
+export function scoreItem<T extends Scorable>(item: T, card: CardDetail): Scored<T> {
   const title = normalize(item.title);
   const cardName = normalize(card.name);
   const total = card.set?.cardCount?.official;
@@ -121,7 +160,9 @@ export function scoreItem(item: VintedItem, card: CardDetail): ScoredItem {
   let number = false;
   if (local) {
     const patterns = [
-      total ? new RegExp(`\\b${local}\\s*[/-]\\s*${total}\\b`, "i") : null,
+      // L'espace est admise comme séparateur : `normalize` vient d'y ramener les
+      // traits d'union, et « 4-102 » doit continuer de valoir « 4/102 ».
+      total ? new RegExp(`\\b${local}\\s*[/\\s-]\\s*${total}\\b`, "i") : null,
       new RegExp(`(?:^|[\\s(\\[#])n?[°o]?\\s*${local}(?:$|[\\s)\\]/,.-])`, "i"),
     ].filter(Boolean) as RegExp[];
     number = patterns.some((re) => re.test(title));
@@ -130,7 +171,9 @@ export function scoreItem(item: VintedItem, card: CardDetail): ScoredItem {
   const keywords = card.set?.name ? setKeywords(card.set.name) : [];
   const set = keywords.length > 0 && keywords.some((word) => title.includes(word));
 
-  const graded = hasAny(title, GRADED_WORDS);
+  // La source prime sur le titre quand elle sait : `?? ` et non `||`, pour
+  // qu'un `false` déclaré par eBay ne soit pas réécrit par un « psa » du titre.
+  const graded = item.graded ?? hasAny(title, GRADED_WORDS);
   const bulk = hasAny(title, BULK_WORDS);
   const fake = hasAny(title, FAKE_WORDS);
 
@@ -152,7 +195,7 @@ export function scoreItem(item: VintedItem, card: CardDetail): ScoredItem {
   return { ...item, match: { name, number, set, graded, bulk, fake, score }, trend, vsMarket };
 }
 
-export function scoreAll(items: VintedItem[], card: CardDetail): ScoredItem[] {
+export function scoreAll<T extends Scorable>(items: T[], card: CardDetail): Scored<T>[] {
   return items.map((item) => scoreItem(item, card));
 }
 
@@ -192,31 +235,43 @@ export const CONDITION_LABELS: Record<NonNullable<Condition>, string> = {
  * la première page est lue. Mesuré sur la carte base1-4 : « Dracaufeu 4/102 »
  * remonte 29 correspondances fortes en page 1, « Dracaufeu carte pokemon » aucune.
  */
+/**
+ * Nom tel qu'on le cherche, par opposition au nom tel qu'il est imprimé.
+ *
+ * Chercher « Latias-ex » revient à chercher une graphie que personne n'emploie
+ * dans une annonce ; on interroge donc les catalogues avec « Latias ex ».
+ */
+function searchName(card: CardDetail): string {
+  return card.name.replace(/[-‐‑‒–—]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
 export function bestQuery(card: CardDetail): string {
+  const name = searchName(card);
   const printed = cardNumber(card);
-  if (printed?.includes("/")) return `${card.name} ${printed}`;
-  if (card.localId) return `${card.name} ${card.localId}`;
-  if (card.set?.name) return `${card.name} ${card.set.name}`;
-  return `${card.name} carte pokemon`;
+  if (printed?.includes("/")) return `${name} ${printed}`;
+  if (card.localId) return `${name} ${card.localId}`;
+  if (card.set?.name) return `${name} ${card.set.name}`;
+  return `${name} carte pokemon`;
 }
 
 /** Requêtes proposées à l'utilisateur, de la plus large à la plus ciblée. */
 export function suggestedQueries(card: CardDetail): { label: string; query: string }[] {
   const out: { label: string; query: string }[] = [];
   const printed = cardNumber(card);
+  const name = searchName(card);
 
-  out.push({ label: "Nom seul", query: `${card.name} carte pokemon` });
+  out.push({ label: "Nom seul", query: `${name} carte pokemon` });
   if (card.localId) {
-    out.push({ label: `Nom + n°${card.localId}`, query: `${card.name} ${card.localId}` });
+    out.push({ label: `Nom + n°${card.localId}`, query: `${name} ${card.localId}` });
   }
   if (printed && printed.includes("/")) {
-    out.push({ label: `Nom + ${printed}`, query: `${card.name} ${printed}` });
+    out.push({ label: `Nom + ${printed}`, query: `${name} ${printed}` });
   }
   if (card.set?.name) {
-    out.push({ label: "Nom + extension", query: `${card.name} ${card.set.name}` });
+    out.push({ label: "Nom + extension", query: `${name} ${card.set.name}` });
   }
   if (card.rarity && /rare|secret|ultra|arc|holo/i.test(card.rarity)) {
-    out.push({ label: `Nom + ${card.rarity}`, query: `${card.name} ${card.rarity}` });
+    out.push({ label: `Nom + ${card.rarity}`, query: `${name} ${card.rarity}` });
   }
 
   const seen = new Set<string>();

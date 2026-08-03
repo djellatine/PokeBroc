@@ -15,6 +15,7 @@ import {
   scoreItem,
   suggestedQueries,
 } from "../lib/match.ts";
+import type { CardDetail } from "../lib/tcgdex.ts";
 import { DRACAUFEU, SANS_COTE, makeItem } from "./helpers.ts";
 
 const score = (title: string, extra = {}) =>
@@ -71,6 +72,62 @@ describe("scoreItem — mots entiers", () => {
   it("ne déclenche pas « psa » sur un mot qui le contient", () => {
     assert.equal(score("Dracaufeu 4/102 psaume collection").graded, false);
     assert.equal(score("Dracaufeu 4/102 PSA 10").graded, true);
+  });
+});
+
+describe("scoreItem — nom à trait d'union", () => {
+  // Depuis Écarlate & Violet, la carte s'imprime « Latias-ex ». Aucune annonce
+  // ne l'écrit ainsi : sans cette équivalence, le fil de ces cartes est vide.
+  const LATIAS: CardDetail = {
+    id: "sv08-239",
+    localId: "239",
+    name: "Latias-ex",
+    set: { id: "sv08", name: "Étincelles Déferlantes", cardCount: { official: 191, total: 252 } },
+    pricing: { cardmarket: { trend: 194 } },
+  };
+
+  const latias = (title: string) => scoreItem(makeItem({ title }), LATIAS).match;
+
+  it("reconnaît le nom écrit avec une espace, comme les vendeurs l'écrivent", () => {
+    const match = latias("Carte Pokémon Latias Ex 239/191 Étincelles Déferlantes");
+    assert.equal(match.name, true);
+    assert.ok(
+      match.score >= STRONG_SCORE,
+      `noté ${match.score}, la carte resterait invisible sous le seuil strict`,
+    );
+  });
+
+  it("reconnaît encore le nom écrit avec son trait d'union", () => {
+    assert.equal(latias("Latias-ex 239/191 Étincelles Déferlantes").name, true);
+  });
+
+  it("reconnaît le tiret long, dont les titres d'annonces sont friands", () => {
+    assert.equal(latias("Latias — ex 239/191 Étincelles Déferlantes").name, true);
+  });
+
+  it("continue de lire un numéro imprimé séparé par un trait d'union", () => {
+    // Régression : le trait d'union devenant une espace, le motif du numéro
+    // doit l'admettre comme séparateur.
+    assert.equal(score("Dracaufeu 4-102 set de base").number, true);
+    assert.equal(score("Dracaufeu 4/102 set de base").number, true);
+  });
+});
+
+describe("scoreItem — gradation déclarée par la source", () => {
+  // eBay tient la gradation de la catégorie de l'annonce, pas du titre. C'est
+  // une information de meilleure qualité : elle doit primer dans les deux sens.
+  it("croit la source quand elle annonce une gradée que le titre tait", () => {
+    assert.equal(score("Dracaufeu 4/102 set de base", { graded: true }).graded, true);
+  });
+
+  it("croit la source quand elle dément un titre qui parle de PSA", () => {
+    // « PSA 10 » dans le titre d'une annonce déclarée non gradée décrit souvent
+    // la carte de référence, pas celle qui est vendue.
+    assert.equal(score("Dracaufeu 4/102 comme la PSA 10", { graded: false }).graded, false);
+  });
+
+  it("retombe sur le titre quand la source ne dit rien, comme Vinted", () => {
+    assert.equal(score("Dracaufeu 4/102 PSA 10", { graded: undefined }).graded, true);
   });
 });
 

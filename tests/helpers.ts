@@ -27,7 +27,14 @@ export const SANS_COTE: CardDetail = {
 
 let nextId = 1;
 
-export function makeItem(overrides: Partial<VintedItem> & { title: string }): VintedItem {
+/**
+ * `graded` est le seul champ étranger à Vinted admis ici : c'est la gradation
+ * déclarée par la source, qu'eBay renseigne et que la notation doit préférer au
+ * titre. Optionnel, donc représentatif des deux places de marché.
+ */
+export function makeItem(
+  overrides: Partial<VintedItem> & { title: string; graded?: boolean },
+): VintedItem & { graded?: boolean } {
   return {
     id: nextId++,
     url: "https://www.vinted.fr/items/1",
