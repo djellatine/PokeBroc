@@ -119,6 +119,14 @@ Le seuil de rétention (6) se lit « c'est bien un lot, **et** quelque chose le 
 suivie » : sans cette seconde condition, l'onglet afficherait le même vrac générique pour toutes les
 cartes de la collection.
 
+Les deux onglets se lisent en liste ou en **grille**, sous la même préférence que le fil des cartes
+(`components/ViewSwitch.tsx`) : c'est un réglage sur la forme des annonces, pas sur leur contenu, et
+deux réglages homonymes à régler séparément se seraient surtout fait oublier l'un des deux. La photo
+compte davantage ici que partout ailleurs — le titre d'un lot ment par omission, `Lot de 300 cartes
+Pokémon` ne dit rien de ce qu'il y a dedans, et c'est le tas photographié qui laisse deviner
+l'époque et l'état. En vignette, l'étiquette posée sur la photo est le **prix par carte**, là où le
+fil y met l'écart à la cote : un lot n'a pas de cote.
+
 L'écart à la cote est tu, et c'est le point qui a dicté le reste : un lot ne contient pas deux cents
 fois la même carte. Comparer 60 € à la cote d'un seul Dracaufeu afficherait `−85 %` et raflerait tout
 classement. À la place, le titre est lu pour y trouver une quantité (`lot de 200`, `200 cartes`,
@@ -344,7 +352,9 @@ proxy.ts                    limitation de débit devant /api/*
 components/
   Dashboard.tsx             collection, filtres et fil — l'état partagé de l'accueil
   Lots.tsx                  page des lots : onglets Récents / Ma collection
+  LotTile.tsx               un lot, en vignette (prix par carte sur la photo)
   ModeSwitch.tsx            bascule Mes cartes / Mes lots, dans l'en-tête
+  ViewSwitch.tsx            liste ou grille, préférence partagée par les deux fils
   OfferRow.tsx              une annonce, en ligne
   CardSearch.tsx            barre de recherche et aperçu clavier
   CollectionStrip.tsx       bandeau des cartes épinglées, qui filtre le fil

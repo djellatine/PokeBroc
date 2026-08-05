@@ -8,6 +8,7 @@ import OfferRow from "@/components/OfferRow";
 import OfferTile from "@/components/OfferTile";
 import { useFrenchOnly } from "@/components/useFrenchOnly";
 import { usePersisted } from "@/components/usePersisted";
+import ViewSwitch, { LAYOUT, useView } from "@/components/ViewSwitch";
 import type { FeedCard, FeedItem, Snapshot } from "@/lib/feed";
 import { percent, plural } from "@/lib/format";
 import { isForeignListing } from "@/lib/language";
@@ -61,34 +62,6 @@ const DEFAULT_FILTERS: Filters = {
 
 const FILTERS_KEY = "pokebroc:filtres";
 
-/* ---------------------------------------------------------------- affichage */
-
-type View = "list" | "grid";
-
-const VIEWS: { value: View; label: string; hint: string }[] = [
-  { value: "list", label: "Liste", hint: "Une annonce par ligne, prix alignés" },
-  { value: "grid", label: "Grille", hint: "Vignettes : les photos en grand" },
-];
-
-/**
- * L'affichage est rangé à part des filtres, et pas seulement par propreté : les
- * filtres sont une dépendance du calcul du fil, alors que la forme des lignes
- * n'y change rien. Mélangés, chaque bascule Liste/Grille retrierait deux cents
- * annonces pour rien.
- */
-const DEFAULT_DISPLAY: { view: View } = { view: "list" };
-
-const DISPLAY_KEY = "pokebroc:affichage";
-
-/** Conteneur du fil et hauteur des squelettes, selon l'affichage retenu. */
-const LAYOUT: Record<View, { list: string; skeleton: string }> = {
-  list: { list: "flex flex-col gap-2", skeleton: "h-[4.75rem]" },
-  grid: {
-    list: "grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5",
-    skeleton: "h-72",
-  },
-};
-
 /**
  * Annonces affichées par carte quand le fil les mélange toutes. Sans ce
  * plafond, une carte très représentée sur Vinted occupe tout l'écran et les
@@ -121,7 +94,7 @@ export default function Dashboard({
   const [settled, setSettled] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [filters, updateFilters] = usePersisted(FILTERS_KEY, DEFAULT_FILTERS);
-  const [display, updateDisplay] = usePersisted(DISPLAY_KEY, DEFAULT_DISPLAY);
+  const [view, setView] = useView();
   // Piloté depuis le drapeau de l'en-tête, via le magasin de `usePersisted`.
   const [frenchOnly] = useFrenchOnly();
   const [selected, setSelected] = useState<string | null>(null);
@@ -312,10 +285,6 @@ export default function Dashboard({
 
   const visible = rows.slice(0, limit);
   const loading = pending.length > 0;
-
-  // Normalisé plutôt que lu tel quel : la valeur vient de `localStorage`, et une
-  // clé inconnue ferait tomber l'indexation de `LAYOUT` sur `undefined`.
-  const view: View = display.view === "grid" ? "grid" : "list";
   const layout = LAYOUT[view];
 
   function markSeen() {
@@ -400,7 +369,7 @@ export default function Dashboard({
           </Toggle>
 
           <div className="ml-auto flex items-center gap-2">
-            <ViewSwitch value={view} onChange={(next) => updateDisplay({ view: next })} />
+            <ViewSwitch value={view} onChange={setView} />
 
             {loading && (
               <span className="flex items-center gap-1.5 text-[11px] text-faint" aria-live="polite">
@@ -539,39 +508,6 @@ function Toggle({
     >
       {children}
     </button>
-  );
-}
-
-/**
- * Bascule d'affichage. Les deux libellés restent visibles plutôt qu'un bouton
- * unique qui changerait de nom : ici l'état courant se lit sans avoir à deviner
- * si l'étiquette décrit ce qu'on voit ou ce qu'on obtiendra en cliquant.
- */
-function ViewSwitch({ value, onChange }: { value: View; onChange: (view: View) => void }) {
-  return (
-    <div
-      role="group"
-      aria-label="Affichage des annonces"
-      className="flex h-8 items-center gap-0.5 rounded-lg border border-line bg-panel-2 p-0.5"
-    >
-      {VIEWS.map((option) => {
-        const active = value === option.value;
-        return (
-          <button
-            key={option.value}
-            type="button"
-            onClick={() => onChange(option.value)}
-            aria-pressed={active}
-            title={option.hint}
-            className={`rounded-md px-2.5 py-1 text-[13px] leading-none transition ${
-              active ? "bg-accent/15 font-medium text-accent" : "text-faint hover:text-text"
-            }`}
-          >
-            {option.label}
-          </button>
-        );
-      })}
-    </div>
   );
 }
 

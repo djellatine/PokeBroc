@@ -2,9 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import LotTile from "@/components/LotTile";
 import { SourceChip, feesLabel, postedHint } from "@/components/OfferRow";
 import { useFrenchOnly } from "@/components/useFrenchOnly";
 import { usePersisted } from "@/components/usePersisted";
+import ViewSwitch, { LAYOUT, type View, useView } from "@/components/ViewSwitch";
 import type { FeedCard } from "@/lib/feed";
 import { age, countdown, euro, plural } from "@/lib/format";
 import { isForeignListing } from "@/lib/language";
@@ -193,6 +195,7 @@ function RecentPanel({
   const [error, setError] = useState<string | null>(null);
   const [limit, setLimit] = useState(PAGE_SIZE);
   const [frenchOnly] = useFrenchOnly();
+  const [view, setView] = useView();
 
   /**
    * L'onglet n'est monté que déplié : la collecte peut donc partir d'un effet
@@ -256,6 +259,8 @@ function RecentPanel({
           setLimit(PAGE_SIZE);
         }}
         count={rows.length}
+        view={view}
+        onView={setView}
       />
 
       {error && <ErrorNote>{error}</ErrorNote>}
@@ -268,7 +273,7 @@ function RecentPanel({
         hiddenBySize={hiddenBySize}
       />
 
-      {loading && rows.length === 0 && <Skeletons />}
+      {loading && rows.length === 0 && <Skeletons view={view} />}
 
       {rows.length > 0 && (
         <Rows
@@ -276,6 +281,7 @@ function RecentPanel({
           total={rows.length}
           cards={{}}
           now={serverNow}
+          view={view}
           onMore={() => setLimit((current) => current + PAGE_SIZE)}
         />
       )}
@@ -317,6 +323,7 @@ function CardsPanel({
   const [error, setError] = useState<string | null>(null);
   const [limit, setLimit] = useState(PAGE_SIZE);
   const [frenchOnly] = useFrenchOnly();
+  const [view, setView] = useView();
 
   const staleKey = initialStaleIds.join("|");
   const fetching = initialStaleIds.filter((id) => !settled.includes(id)).length > 0;
@@ -416,6 +423,8 @@ function CardsPanel({
           setLimit(PAGE_SIZE);
         }}
         count={rows.length}
+        view={view}
+        onView={setView}
       />
 
       {error && <ErrorNote>{error}</ErrorNote>}
@@ -430,7 +439,7 @@ function CardsPanel({
         hiddenBySize={hiddenBySize}
       />
 
-      {fetching && rows.length === 0 && <Skeletons />}
+      {fetching && rows.length === 0 && <Skeletons view={view} />}
 
       {rows.length > 0 && (
         <Rows
@@ -438,6 +447,7 @@ function CardsPanel({
           total={rows.length}
           cards={cards}
           now={serverNow}
+          view={view}
           onMore={() => setLimit((current) => current + PAGE_SIZE)}
         />
       )}
@@ -517,12 +527,16 @@ function Controls({
   sized,
   onSized,
   count,
+  view,
+  onView,
 }: {
   sort: LotSort;
   onSort: (value: LotSort) => void;
   sized: boolean;
   onSized: (value: boolean) => void;
   count: number;
+  view: View;
+  onView: (value: View) => void;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -553,6 +567,8 @@ function Controls({
       >
         Quantité connue
       </button>
+
+      <ViewSwitch value={view} onChange={onView} label="Affichage des lots" />
     </div>
   );
 }
@@ -595,11 +611,12 @@ function Notices({
   );
 }
 
-function Skeletons() {
+function Skeletons({ view }: { view: View }) {
+  const layout = LAYOUT[view];
   return (
-    <ul className="flex flex-col gap-2">
-      {Array.from({ length: 4 }).map((_, index) => (
-        <li key={index} className="skeleton h-[4.75rem] rounded-lg border border-line" />
+    <ul className={layout.list}>
+      {Array.from({ length: view === "grid" ? 10 : 4 }).map((_, index) => (
+        <li key={index} className={`skeleton rounded-lg border border-line ${layout.skeleton}`} />
       ))}
     </ul>
   );
@@ -610,19 +627,23 @@ function Rows({
   total,
   cards,
   now,
+  view,
   onMore,
 }: {
   items: LotItem[];
   total: number;
   cards: Record<string, FeedCard>;
   now: number;
+  view: View;
   onMore: () => void;
 }) {
+  const Lot = view === "grid" ? LotTile : LotRow;
+
   return (
     <>
-      <ul className="flex flex-col gap-2">
+      <ul className={LAYOUT[view].list}>
         {items.map((item) => (
-          <LotRow
+          <Lot
             key={item.id}
             item={item}
             card={item.cardId ? cards[item.cardId] : undefined}
