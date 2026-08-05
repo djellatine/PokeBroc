@@ -1,0 +1,116 @@
+# Répond à une seule question, et n'a pas vocation à rester.
+#
+# L'en-tête de `collect/lbc.py` affirme qu'« un hébergeur ferait tomber
+# Datadome dès la première requête ». Le 403 du `fetch` de Node, lui, est
+# mesuré ; cette phrase-là ne l'est pas — c'est une justification de conception.
+# Tant qu'elle n'est pas vérifiée, on ne sait pas si le site peut être hébergé
+# ailleurs que sur une machine à IP résidentielle.
+#
+# Ce workflow lance donc le collecteur depuis un runner GitHub, c'est-à-dire
+# une IP de datacenter, et rapporte ce que Datadome en fait. Vinted est sondé
+# dans la foulée, pour la même raison. eBay ne l'est pas : c'est une API
+# officielle avec des clés, la réputation de l'IP n'y joue aucun rôle.
+#
+# Lancement manuel : onglet Actions → « Sondage datacenter » → Run workflow.
+
+name: Sondage datacenter
+
+on:
+  workflow_dispatch:
+
+jobs:
+  sonder:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: D'où part la requête
+        run: |
+          echo "### D'où part la requête" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          curl -s https://ipinfo.io/json | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installer curl_cffi
+        run: pip install -r collect/requirements.txt
+
+      # `--dry-run` : on veut savoir si Datadome laisse passer, pas déposer un
+      # instantané. `continue-on-error` pour que l'échec de cette sonde
+      # n'empêche pas la suivante — un échec ici est un résultat, pas une panne.
+      - name: Sonde leboncoin (Datadome)
+        id: lbc
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          python collect/lbc.py --dry-run --window 6 2>&1 | tee /tmp/lbc.log
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Sonde Vinted (session anonyme)
+        id: vinted
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          # Le crochet de `tests/resolve-ts.mjs` résout les imports relatifs
+          # depuis le dossier du script, pas depuis le répertoire courant : la
+          # sonde doit donc être écrite dans le dépôt. Placée dans /tmp, elle
+          # échouait sur un `ERR_MODULE_NOT_FOUND` que le verdict aurait pris
+          # pour un blocage de Vinted.
+          cat > ./sonde-vinted.mjs <<'EOF'
+          const { searchVinted } = await import("./lib/vinted.ts");
+          const result = await searchVinted({
+            query: "lot cartes pokemon",
+            order: "newest_first",
+            perPage: 48,
+          });
+          console.log(`Vinted : ${result.items.length} annonces reçues, ${result.total} au total.`);
+          if (result.items.length === 0) process.exit(1);
+          EOF
+          node --import ./tests/resolve-ts.mjs ./sonde-vinted.mjs 2>&1 | tee /tmp/vinted.log
+
+      - name: Verdict
+        if: always()
+        run: |
+          verdict() { if [ "$1" = "success" ]; then echo "✅ passe"; else echo "❌ bloqué"; fi; }
+
+          {
+            echo "### Verdict"
+            echo ""
+            echo "| Source | Depuis cette IP de datacenter |"
+            echo "| --- | --- |"
+            echo "| leboncoin (Datadome) | $(verdict "${{ steps.lbc.outcome }}") |"
+            echo "| Vinted (session anonyme) | $(verdict "${{ steps.vinted.outcome }}") |"
+            echo ""
+            echo "Pour comparaison, les mêmes sondes depuis une IP résidentielle, le 5 août 2026 :"
+            echo "leboncoin remontait des annonces vieilles de 3 min, Vinted 48 annonces sur 960."
+            echo "Un échec ici n'est donc pas un script cassé — c'est bien l'IP."
+            echo ""
+            echo "<details><summary>Sortie leboncoin</summary>"
+            echo ""
+            echo '```'
+            cat /tmp/lbc.log 2>/dev/null || echo "(aucune sortie)"
+            echo '```'
+            echo "</details>"
+            echo ""
+            echo "<details><summary>Sortie Vinted</summary>"
+            echo ""
+            echo '```'
+            cat /tmp/vinted.log 2>/dev/null || echo "(aucune sortie)"
+            echo '```'
+            echo "</details>"
+            echo ""
+            echo "**Si les deux passent** : le site peut être hébergé entièrement dans le nuage,"
+            echo "collecteur compris, et le PC peut rester éteint."
+            echo ""
+            echo "**Si leboncoin est bloqué** : la phrase de l'en-tête était juste, et le collecteur"
+            echo "exige une IP résidentielle. Attention, un échec ici condamne aussi OVH, dont l'ASN"
+            echo "est plus surveillé que celui d'Azure ; l'inverse n'est pas vrai — un succès ici ne"
+            echo "garantit pas OVH."
+          } >> "$GITHUB_STEP_SUMMARY"
