@@ -299,6 +299,36 @@ pour un fichier de 18 Ko**, des `502` par salves, et des requêtes qui n'aboutis
   cookies de session anonyme : `lib/vinted.ts` en ouvre une en visitant la page d'accueil, la garde
   ~9 minutes en mémoire et la renouvelle automatiquement sur un `401`. Les appels sortants sont
   sérialisés (350 ms minimum entre deux) et les résultats mis en cache 90 secondes.
+- **Lots leboncoin** : collectés par `collect/lbc.py`, hors du site. Voir ci-dessous — c'est la seule
+  source que le serveur ne peut pas interroger lui-même.
+
+### Pourquoi leboncoin passe par un script Python
+
+Leboncoin est derrière Datadome, qui n'inspecte pas l'en-tête `User-Agent` mais l'empreinte du
+handshake TLS et de la négociation HTTP/2. Le `fetch` de Node en produit une immédiatement
+reconnaissable : mesuré, `403` sur la page d'accueil elle-même. Aucune session à entretenir comme
+chez Vinted, aucun jeton comme chez eBay — le problème n'est pas l'authentification, c'est la pile
+TLS, et il ne se règle pas en TypeScript. `collect/lbc.py` utilise `curl_cffi`, qui rejoue
+l'empreinte exacte de Chrome.
+
+Le script est donc le seul morceau du projet qui ne soit pas en TypeScript, et il fait *uniquement*
+ce que le reste ne peut pas faire : récupérer, normaliser, écrire. `isPokemonLot`, `scoreLots` et
+`lotSize` restent dans `lib/match.ts`, appliqués aux trois places de marché par le même chemin.
+
+Ce découplage est aussi ce qui rend la collecte tenable : elle part de l'IP résidentielle de la
+machine, là où un hébergeur — IP de centre de données — se ferait bloquer dès la première requête.
+Le site, lui, ne lit que le disque et ne contacte jamais leboncoin.
+
+Deux conséquences à connaître :
+
+- **L'API mobile n'est pas utilisée.** `api.leboncoin.fr/finder/search` rendrait le même JSON sans
+  les 400 Ko de HTML autour, mais exige un `User-Agent` d'application (`LBC;iOS;…`) qui ne s'accorde
+  avec aucune empreinte TLS de navigateur : refusé dès la première requête. La route web porte les
+  mêmes champs dans `__NEXT_DATA__`.
+- **Le tri par date de leboncoin porte sur la dernière remontée, pas sur la mise en ligne.** Une
+  annonce de deux mois republiée arrive en tête ; mesuré, ~13 % des résultats sont dans ce cas, dont
+  une de 64 jours en première position. Le collecteur filtre donc sur `first_publication_date`, et
+  c'est cette date que le site affiche.
 
 ## Développement
 
@@ -312,6 +342,67 @@ npm run lint
 
 Aucune variable d'environnement n'est nécessaire en développement. `NEXT_PUBLIC_SITE_URL` sert au
 plan de site.
+
+### Le collecteur leboncoin
+
+Facultatif : sans lui, la source disparaît simplement du flux des lots récents, comme eBay sans clé
+d'API. Il demande Python 3.10 ou plus.
+
+```bash
+pip install curl_cffi tzdata
+
+python collect/lbc.py              # fenêtre de 3 h, écrit .data/lbc/recents.json
+python collect/lbc.py --dry-run    # n'écrit rien, résume sur la sortie
+python collect/lbc.py --window 6   # remonter plus loin
+python collect/test_lbc.py         # 18 tests, sans réseau
+```
+
+Il tourne sur minuterie, jamais à la demande du site. Toutes les trois heures suffit : mesuré, une
+requête produit ~30 mises en ligne par heure, et trois pages en couvrent trois heures. Sous Windows :
+
+```powershell
+$py = "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe"
+$action  = New-ScheduledTaskAction -Execute $py `
+             -Argument "`"$PWD\collect\lbc.py`" --quiet" -WorkingDirectory "$PWD"
+$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) `
+             -RepetitionInterval (New-TimeSpan -Hours 3)
+# StartWhenAvailable rattrape le passage manqué pendant une mise en veille.
+$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries
+Register-ScheduledTask -TaskName PokeBroc-LBC -Action $action -Trigger $trigger `
+                       -Settings $settings -Force
+```
+
+Pour la retirer : `Unregister-ScheduledTask -TaskName PokeBroc-LBC -Confirm:$false`.
+
+`lib/lbc.ts` refuse un instantané de plus de six heures — deux passages manqués — plutôt que
+d'afficher comme « récent » un fichier oublié. Un instantané *vide* reste valide : trois heures sans
+un lot mis en ligne est un résultat, pas une panne, et cela arrive la nuit.
+
+### Savoir ce qu'a fait un passage
+
+Le script tient un journal dans `.data/lbc/collect.log` (200 dernières lignes, soit ~3 semaines à
+huit passages par jour) :
+
+```powershell
+Get-Content .data\lbc\collect.log -Encoding UTF8 -Tail 20
+```
+
+L'option `-Encoding UTF8` n'est pas décorative : PowerShell 5.1 lit en ANSI par défaut et affiche
+`publiÃ©s` là où le fichier contient bien `publiés`.
+
+Le journal existe parce que le code de sortie seul est indéchiffrable — Windows publie `2` pour
+« fichier introuvable », valeur que le script emploie aussi pour « bloqué à l'amorçage ». Les codes :
+
+| Code | Sens |
+| --- | --- |
+| `0` | passage réussi, instantané écrit |
+| `1` | rien collecté et toutes les requêtes en erreur |
+| `2` | bloqué à l'amorçage : Datadome a refusé la page d'accueil |
+| `3` | exception inattendue, détaillée dans le journal |
+
+Le collecteur reste poli : 2 s entre deux requêtes, empreinte de navigateur tirée au sort à chaque
+exécution, et arrêt anticipé dès qu'une page sort de la fenêtre — en pratique 9 requêtes par
+passage, soit ~72 par jour.
 
 ### Tests
 
@@ -374,8 +465,12 @@ lib/
   image-cache.ts            cache disque des visuels, préchauffage, purge
   tcgdex.ts                 cartes, extensions, images, cotes
   vinted.ts                 session, throttle, cache, normalisation
+  lbc.ts                    lecture des lots leboncoin (aucune requête : voir collect/)
   match.ts                  notation des annonces, état, requêtes
   format.ts                 euros, pourcentages, ancienneté
+collect/
+  lbc.py                    collecteur leboncoin — hors du site, sur minuterie
+  test_lbc.py               ses tests, sans réseau
 tests/                      node:test — match, rate-limit, sightings, format
 ```
 
@@ -402,9 +497,21 @@ tests/                      node:test — match, rate-limit, sightings, format
 - La traduction des symboles vaut pour la recherche d'**annonces**, pas pour la recherche de
   **cartes** de l'en-tête : celle-ci interroge TCGdex, qui ne connaît que le nom officiel. Taper
   `dracaufeu gold star` n'y trouve rien ; `dracaufeu` remonte la carte, symbole compris.
+- Les lots leboncoin ne se rafraîchissent pas à la demande : le site affiche ce que la dernière
+  minuterie a déposé. Un visiteur ne peut pas rattraper une collecte en retard, et un serveur
+  hébergé ne peut pas collecter du tout — l'IP d'un centre de données est bloquée d'emblée.
+- `collect/lbc.py` ne recherche pas « lot pokemon » sans le mot « cartes », là où le flux Vinted le
+  fait : sur leboncoin cette requête rend surtout des peluches, des jouets et des vêtements. Le
+  catalogue de Vinted, déjà celui d'une brocante de mode, restait exploitable ; celui de leboncoin
+  ne l'est pas.
+- Leboncoin ne publie ni compteur de favoris ni prix total en recherche : le nombre de favoris vaut
+  toujours zéro, et les frais de port n'apparaissent pas — le mode de remise se choisit à l'achat.
 
 ## Suite possible
 
-Alertes par e-mail sous un prix cible, autres jeux (Yu-Gi-Oh!, One Piece), autres places de marché
-(Leboncoin, eBay), et un rafraîchisseur en tâche de fond qui balaierait l'union des cartes suivies
-sans attendre qu'un visiteur passe.
+Alertes par e-mail sous un prix cible, autres jeux (Yu-Gi-Oh!, One Piece), et un rafraîchisseur en
+tâche de fond qui balaierait l'union des cartes suivies sans attendre qu'un visiteur passe.
+
+Leboncoin n'alimente aujourd'hui que le flux des lots récents. L'étendre aux lots *par carte*
+suivie demanderait de passer les requêtes de `lotQueries` au collecteur, qui ne connaît rien de la
+collection — c'est la seule chose que le découplage rend malcommode.

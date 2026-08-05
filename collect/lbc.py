@@ -1,0 +1,403 @@
+#!/usr/bin/env python3
+"""
+Collecteur leboncoin — le seul morceau du projet qui ne soit pas en TypeScript.
+
+Pourquoi un script séparé, et en Python
+---------------------------------------
+Leboncoin est derrière Datadome, qui n'inspecte pas l'en-tête `User-Agent` mais
+l'empreinte du *handshake* TLS et de la négociation HTTP/2. Le `fetch` de Node
+en produit une immédiatement reconnaissable : mesuré sur la page d'accueil,
+403 systématique. `curl_cffi` rejoue l'empreinte exacte de Chrome, et passe.
+Cette contrainte est la seule raison d'être de ce fichier : il fait ce que le
+reste du code ne *peut* pas faire, et rien d'autre. Aucune notation, aucun
+filtrage métier — `isPokemonLot`, `scoreLots` et `lotSize` restent en
+TypeScript, où vivent déjà les règles des deux autres places de marché.
+
+Ce qu'il produit
+----------------
+Un instantané `.data/lbc/recents.json` au format que `toLot()` attend déjà, lu
+par `lib/lbc.ts`. Le script n'est jamais appelé par le site : il tourne sur
+minuterie, et le site ne lit que le disque. C'est ce découplage qui rend la
+collecte gratuite — elle part d'une IP résidentielle, celle de la machine, là
+où un hébergeur ferait tomber Datadome dès la première requête.
+
+Pourquoi l'API mobile n'est pas utilisée
+----------------------------------------
+`api.leboncoin.fr/finder/search` rendrait le même JSON sans les 400 Ko de HTML
+autour. Mais il exige un `User-Agent` d'application mobile (`LBC;iOS;…`), qui
+ne s'accorde avec aucune empreinte TLS de navigateur : Datadome refuse dès la
+première requête. La route web porte les mêmes champs dans `__NEXT_DATA__`.
+
+Usage
+-----
+    python collect/lbc.py                 # fenêtre de 3 h, écrit .data/lbc/
+    python collect/lbc.py --window 6      # remonter plus loin
+    python collect/lbc.py --dry-run       # n'écrit rien, résume sur la sortie
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import random
+import re
+import sys
+import time
+import uuid
+from datetime import datetime
+from pathlib import Path
+from urllib.parse import quote_plus
+from zoneinfo import ZoneInfo
+
+try:
+    from curl_cffi import requests
+except ImportError:  # pragma: no cover - dépend de l'environnement
+    sys.exit("curl_cffi manquant : pip install curl_cffi tzdata")
+
+# Lancé par le planificateur Windows, ce script hérite d'une sortie en cp1252,
+# où « → » et les drapeaux des titres n'existent pas : un `UnicodeEncodeError`
+# tuerait la collecte après l'avoir menée à bien. `errors="replace"` plutôt que
+# `"strict"` — un caractère de remplacement dans un journal vaut mieux qu'un
+# passage perdu.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
+# Miroir de RECENT_QUERIES dans lib/lots.ts, à une exception près : « lot
+# pokemon » est écarté. Sans le mot « cartes », leboncoin rend surtout des
+# peluches, des jouets et des vêtements — là où Vinted, dont le catalogue est
+# déjà celui d'une brocante de mode, restait exploitable.
+QUERIES = [
+    "lot cartes pokemon",
+    "vrac cartes pokemon",
+    "collection cartes pokemon",
+    "classeur cartes pokemon",
+]
+
+HOST = "https://www.leboncoin.fr"
+
+# Trois pages couvrent environ trois heures de mises en ligne : mesuré à ~30
+# annonces publiées par heure et par requête, pour 35 résultats par page. Le
+# filtrage sur la fenêtre reste l'autorité — ceci n'est que le nombre de pages
+# à demander pour ne pas la tronquer.
+PAGES_PER_QUERY = 3
+
+# Le tri par date de leboncoin porte sur `index_date`, donc sur la dernière
+# *remontée* et non sur la mise en ligne : une annonce de deux mois republiée
+# arrive en tête. Mesuré sur le flux réel, environ 13 % des résultats sont dans
+# ce cas, dont une de 64 jours en première position. D'où la fenêtre, appliquée
+# sur `first_publication_date`, seule date de publication réelle.
+DEFAULT_WINDOW_H = 3.0
+
+THROTTLE_S = 2.0
+TIMEOUT_S = 30.0
+MAX_ATTEMPTS = 3
+
+# Lignes conservées dans `collect.log`. À huit passages par jour, cela couvre
+# environ trois semaines — de quoi voir venir une dérive de Datadome.
+LOG_LINES = 200
+
+PARIS = ZoneInfo("Europe/Paris")
+NEXT_DATA = re.compile(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', re.S)
+
+# Les empreintes que curl_cffi sait rejouer. Une par exécution, tirée au sort :
+# deux passages consécutifs ne présentent pas le même profil.
+IMPERSONATIONS = ["chrome", "chrome124", "edge101", "safari17_0"]
+
+
+class Blocked(RuntimeError):
+    """Datadome a refusé la requête."""
+
+
+def parse_date(raw: str | None) -> int | None:
+    """`'2026-08-05 11:02:33'`, heure de Paris, vers un epoch en millisecondes.
+
+    Le fuseau est explicite plutôt que laissé à l'horloge locale : la machine
+    qui collecte n'est pas forcément réglée sur Paris, et un décalage d'une
+    heure suffirait à vider la fenêtre de trois heures d'un tiers.
+    """
+    if not raw:
+        return None
+    try:
+        naive = datetime.strptime(str(raw)[:19], "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+    return int(naive.replace(tzinfo=PARIS).timestamp() * 1000)
+
+
+def attribute(ad: dict, key: str) -> str | None:
+    """Valeur lisible d'un attribut leboncoin, qui les publie en liste."""
+    for entry in ad.get("attributes") or []:
+        if entry.get("key") == key:
+            return entry.get("value_label") or entry.get("value")
+    return None
+
+
+def price_of(ad: dict) -> float | None:
+    """Le prix est publié en liste — `[55]` — et parfois vide."""
+    raw = ad.get("price")
+    if isinstance(raw, list):
+        raw = raw[0] if raw else None
+    if raw is None:
+        cents = ad.get("price_cents")
+        return round(cents / 100, 2) if cents else None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def normalize(ad: dict) -> dict | None:
+    """Une annonce leboncoin vers la forme `MarketItem` que `toLot()` attend.
+
+    Rend `None` si l'annonce n'a ni identifiant ni titre : le reste du pipeline
+    suppose les deux, et une entrée mutilée coûterait plus cher à filtrer en
+    aval qu'à écarter ici.
+    """
+    list_id = ad.get("list_id")
+    subject = (ad.get("subject") or "").strip()
+    if not list_id or not subject:
+        return None
+
+    images = ad.get("images") or {}
+    owner = ad.get("owner") or {}
+
+    return {
+        "id": list_id,
+        "title": subject,
+        "url": ad.get("url") or f"{HOST}/ad/collection/{list_id}",
+        "thumbnail": images.get("small_url") or images.get("thumb_url"),
+        "price": price_of(ad),
+        # Les frais de port dépendent du mode de remise choisi à l'achat, que
+        # l'annonce ne fixe pas : pas de prix total à annoncer ici. `toLot()`
+        # retombe sur `price`.
+        "totalPrice": None,
+        "status": attribute(ad, "condition"),
+        # « Urgent » et autres options payantes existent, mais ne remontent pas
+        # dans le JSON de recherche. Aucune annonce n'est donc sponsorisée.
+        "promoted": False,
+        # leboncoin ne publie pas de compteur de favoris en recherche :
+        # `counters` est un objet vide.
+        "favourites": 0,
+        "createdAt": parse_date(ad.get("first_publication_date")),
+        "city": (ad.get("location") or {}).get("city"),
+        "seller": owner.get("name"),
+    }
+
+
+def new_session(impersonate: str) -> requests.Session:
+    """Session amorcée sur la page d'accueil, pour son cookie `datadome`.
+
+    Attaquer `/recherche` directement, sans cookie, se solde par un 403.
+    """
+    session = requests.Session(impersonate=impersonate)
+    session.headers.update({"Accept-Language": "fr-FR,fr;q=0.9"})
+    response = session.get(HOST + "/", timeout=TIMEOUT_S)
+    if response.status_code != 200:
+        raise Blocked(f"amorçage refusé (HTTP {response.status_code})")
+    return session
+
+
+def search(session: requests.Session, query: str, page: int) -> list[dict]:
+    """Une page de résultats, triée du plus récemment remonté au plus ancien."""
+    url = (
+        f"{HOST}/recherche"
+        f"?text={quote_plus(query)}"
+        f"&sort=time&order=desc&page={page}"
+    )
+    response = session.get(url, timeout=TIMEOUT_S)
+
+    if response.status_code in (403, 429):
+        raise Blocked(f"HTTP {response.status_code} sur « {query} » page {page}")
+    if response.status_code != 200:
+        raise RuntimeError(f"HTTP {response.status_code} sur « {query} » page {page}")
+
+    found = NEXT_DATA.search(response.text)
+    if not found:
+        raise RuntimeError(f"__NEXT_DATA__ absent sur « {query} » page {page}")
+
+    payload = json.loads(found.group(1))
+    return payload["props"]["pageProps"].get("searchData", {}).get("ads") or []
+
+
+def collect(window_h: float, verbose: bool) -> tuple[list[dict], list[str]]:
+    """Toutes les requêtes, dédupliquées, restreintes à la fenêtre.
+
+    Les erreurs sont accumulées plutôt que propagées : une requête qui échoue
+    ne doit pas vider l'instantané des trois autres, exactement comme une panne
+    de Vinted ne doit pas emporter eBay dans `collectRecent`.
+    """
+    cutoff = (time.time() - window_h * 3600) * 1000
+    session = new_session(random.choice(IMPERSONATIONS))
+    items: dict[int, dict] = {}
+    problems: list[str] = []
+
+    for query in QUERIES:
+        for page in range(1, PAGES_PER_QUERY + 1):
+            ads: list[dict] | None = None
+
+            for attempt in range(1, MAX_ATTEMPTS + 1):
+                try:
+                    ads = search(session, query, page)
+                    break
+                except Blocked as error:
+                    if attempt == MAX_ATTEMPTS:
+                        problems.append(str(error))
+                        break
+                    # Une empreinte grillée le reste : on en reprend une autre
+                    # plutôt que de réessayer la même, et on laisse le temps
+                    # au compteur de Datadome de retomber.
+                    time.sleep(THROTTLE_S * 2 * attempt)
+                    session = new_session(random.choice(IMPERSONATIONS))
+                except (RuntimeError, ValueError, KeyError) as error:
+                    problems.append(str(error))
+                    break
+
+            if ads is None:
+                continue
+
+            fresh_on_page = 0
+            for ad in ads:
+                item = normalize(ad)
+                if item is None:
+                    continue
+                if item["createdAt"] is None or item["createdAt"] < cutoff:
+                    continue
+                fresh_on_page += 1
+                items.setdefault(item["id"], item)
+
+            if verbose:
+                print(
+                    f"  « {query} » page {page} : "
+                    f"{fresh_on_page}/{len(ads)} dans la fenêtre",
+                    file=sys.stderr,
+                )
+
+            # La page est déjà entièrement hors fenêtre : les suivantes le
+            # seront davantage, le tri étant décroissant. On arrête cette
+            # requête là plutôt que de payer des pages inutiles.
+            if fresh_on_page == 0 and ads:
+                break
+
+            time.sleep(THROTTLE_S)
+
+    ordered = sorted(items.values(), key=lambda item: item["createdAt"], reverse=True)
+    return ordered, problems
+
+
+def write_atomic(target: Path, payload: dict) -> None:
+    """Écriture par fichier temporaire puis renommage.
+
+    Même garantie que `writeJson` côté TypeScript, et pour la même raison : le
+    site lit ce fichier pendant que la minuterie le réécrit, et une lecture ne
+    doit jamais tomber sur un JSON tronqué.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(f".{uuid.uuid4()}.tmp")
+    try:
+        tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, target)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def journal(target: Path, message: str) -> None:
+    """Trace d'exécution, à côté de l'instantané.
+
+    Sans elle, un passage raté sous le planificateur ne laisse qu'un code de
+    sortie — et un code de sortie ne dit pas *ce qui* a échoué. Windows publie
+    d'ailleurs `2` pour « fichier introuvable », valeur que ce script emploie
+    aussi pour « bloqué à l'amorçage » : impossible de les distinguer sans
+    journal.
+
+    Un journal qui échoue n'a jamais de raison de faire échouer une collecte
+    réussie, d'où l'erreur avalée.
+    """
+    log = target.parent / "collect.log"
+    stamp = datetime.now(PARIS).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        log.parent.mkdir(parents=True, exist_ok=True)
+        previous = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+        kept = (previous + [f"{stamp}  {message}"])[-LOG_LINES:]
+        log.write_text("\n".join(kept) + "\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Collecte les lots récents sur leboncoin.")
+    parser.add_argument(
+        "--window",
+        type=float,
+        default=DEFAULT_WINDOW_H,
+        help=f"fenêtre de mise en ligne, en heures (défaut : {DEFAULT_WINDOW_H})",
+    )
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="chemin de l'instantané (défaut : .data/lbc/recents.json à la racine)",
+    )
+    parser.add_argument("--dry-run", action="store_true", help="n'écrit rien")
+    parser.add_argument("--quiet", action="store_true", help="pas de détail par page")
+    args = parser.parse_args()
+
+    root = Path(__file__).resolve().parent.parent
+    target = args.out or root / ".data" / "lbc" / "recents.json"
+
+    started = time.time()
+    try:
+        items, problems = collect(args.window, verbose=not args.quiet)
+    except Blocked as error:
+        # Aucune requête n'est passée. Le code de sortie le signale, le journal
+        # dit quoi — les deux, parce que le premier seul est indéchiffrable.
+        message = f"ÉCHEC bloqué à l'amorçage ({error})"
+        print(f"leboncoin : {message}", file=sys.stderr)
+        journal(target, message)
+        return 2
+    except Exception as error:  # noqa: BLE001 - dernier filet avant le planificateur
+        # Sans ceci, une exception inattendue ne laisse qu'une trace Python sur
+        # une sortie que personne ne lit, et un code de sortie 1 indistinct.
+        message = f"ÉCHEC {type(error).__name__} : {error}"
+        print(f"leboncoin : {message}", file=sys.stderr)
+        journal(target, message)
+        return 3
+
+    snapshot = {
+        "at": int(started * 1000),
+        "windowHours": args.window,
+        "queries": QUERIES,
+        "items": items,
+    }
+    if problems:
+        # Le champ porte le même nom que côté TypeScript : instantané valide,
+        # mais incomplet.
+        snapshot["partial"] = " · ".join(dict.fromkeys(problems))
+
+    elapsed = time.time() - started
+    summary = (
+        f"{len(items)} lots publiés dans les {args.window:g} h "
+        f"({len(QUERIES)} requêtes, {elapsed:.1f} s)"
+        + (f" — {len(problems)} erreur(s) : {snapshot.get('partial', '')}" if problems else "")
+    )
+    print(f"leboncoin : {summary}")
+
+    if args.dry_run:
+        for item in items[:10]:
+            age_min = (started * 1000 - item["createdAt"]) / 60000
+            price = f"{item['price']:.0f} EUR" if item["price"] else "-"
+            print(f"  il y a {age_min:>5.0f} min  {price:>9}  {item['title'][:60]}")
+        return 0
+
+    write_atomic(target, snapshot)
+    print(f"  → {target}")
+    journal(target, summary)
+
+    # Rien collecté *et* que des erreurs : la minuterie doit pouvoir alerter.
+    return 1 if not items and problems else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

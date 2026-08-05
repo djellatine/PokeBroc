@@ -63,7 +63,20 @@ export interface FeedCard {
  * le réseau jusqu'au navigateur, et les champs inutilisés y coûteraient deux
  * fois.
  */
-export type Source = "vinted" | "ebay";
+export type Source = "vinted" | "ebay" | "lbc";
+
+/**
+ * Nom d'affichage d'une place de marché.
+ *
+ * Ici plutôt que dans un composant : les messages d'erreur de collecte le
+ * citent (« Vinted : … »), et ces messages naissent côté serveur, hors de
+ * portée du dossier `components`.
+ */
+export const SOURCE_NAMES: Record<Source, string> = {
+  vinted: "Vinted",
+  ebay: "eBay",
+  lbc: "leboncoin",
+};
 
 export interface FeedItem {
   /** Préfixé par la source : deux places de marché numérotent chacune de son côté. */

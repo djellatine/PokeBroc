@@ -20,6 +20,7 @@
 import path from "node:path";
 import { isConfigured as hasEbay, searchEbay } from "./ebay";
 import { DATA_DIR, readJson, safeFileName, serialize, writeJson } from "./json-file";
+import { isConfigured as hasLbc, searchLbcRecents } from "./lbc";
 import {
   condition,
   isPokemonLot,
@@ -29,7 +30,7 @@ import {
   LOT_SCORE,
   type Condition,
 } from "./match";
-import type { FeedCard, Source } from "./feed";
+import { SOURCE_NAMES, type FeedCard, type Source } from "./feed";
 import type { FavoriteCard } from "./store";
 import { getCard, type CardDetail } from "./tcgdex";
 import { searchVinted } from "./vinted";
@@ -37,12 +38,26 @@ import { searchVinted } from "./vinted";
 const DIR = path.join(DATA_DIR, "lots");
 
 /**
- * Durée de validité, trois fois celle du fil. Un lot à 300 cartes n'est pas
- * une bonne affaire qui s'évapore en dix minutes : il reste en ligne des
- * semaines, souvent jusqu'à négociation. Le rafraîchir au rythme du fil
- * tripleraient les appels aux catalogues sans rien montrer de neuf.
+ * Durée de validité : dix-huit fois celle du fil.
+ *
+ * Un lot à 300 cartes n'est pas une bonne affaire qui s'évapore en dix minutes.
+ * Il reste en ligne des semaines, souvent jusqu'à négociation — le rafraîchir
+ * au rythme du fil coûterait des appels aux catalogues sans rien montrer de
+ * neuf. Le rythme doit suivre celui des *mises en ligne*, pas celui des
+ * disparitions.
+ *
+ * Trente minutes, valeur précédente, était calquée sur le fil par symétrie
+ * plutôt que sur ce que la collecte rapporte réellement. Trois heures s'aligne
+ * sur ce qui a été mesuré côté leboncoin : une requête *générique* produit une
+ * trentaine de mises en ligne par heure, et une requête de lot par carte —
+ * « lot Dracaufeu », bien plus étroite — en produit quelques-unes par jour. À
+ * trente minutes, la quasi-totalité des collectes réécrivait le même
+ * instantané.
+ *
+ * Aucun effet sur une carte qu'on vient d'ajouter : sans instantané, elle est
+ * périmée d'emblée et collectée au premier affichage.
  */
-export const LOTS_FRESH_MS = 30 * 60 * 1000;
+export const LOTS_FRESH_MS = 3 * 60 * 60 * 1000;
 
 /** Lots conservés par carte. La queue de liste ne cite déjà plus la carte. */
 const MAX_PER_CARD = 20;
@@ -204,13 +219,23 @@ function toLot(
 }
 
 /**
+ * Places de marché interrogeables à la demande.
+ *
+ * Leboncoin en est exclu, et le type le dit plutôt qu'un commentaire : sa
+ * collecte tourne sur minuterie dans un processus séparé — voir `lib/lbc.ts` —
+ * et ne sait donc rien des requêtes d'une carte particulière. Il n'alimente
+ * que le flux des lots récents, qui ne part d'aucune carte.
+ */
+type QueryableSource = Exclude<Source, "lbc">;
+
+/**
  * Interroge une place de marché sur toutes les requêtes de lot d'une carte.
  *
  * Rend toujours une liste, même vide : l'erreur est retournée plutôt que
  * propagée, pour qu'une place de marché en panne n'emporte pas l'autre.
  */
 async function collect(
-  source: Source,
+  source: QueryableSource,
   card: CardDetail,
   queries: string[],
 ): Promise<{ items: LotItem[]; error: string | null }> {
@@ -257,7 +282,7 @@ async function collect(
       error: null,
     };
   } catch (error) {
-    const label = source === "vinted" ? "Vinted" : "eBay";
+    const label = SOURCE_NAMES[source];
     const message = error instanceof Error ? error.message : `Recherche ${label} impossible.`;
     return { items: [], error: `${label} : ${message}` };
   }
@@ -301,7 +326,7 @@ export async function refreshLots(favorite: FavoriteCard, now = Date.now()): Pro
     };
 
     const queries = lotQueries(card);
-    const sources: Source[] = hasEbay() ? ["vinted", "ebay"] : ["vinted"];
+    const sources: QueryableSource[] = hasEbay() ? ["vinted", "ebay"] : ["vinted"];
     const collected = await Promise.all(
       sources.map((source) => collect(source, card, queries)),
     );
@@ -483,6 +508,34 @@ async function collectRecent(
       };
     }
 
+    if (source === "lbc") {
+      // Aucune requête réseau ici : le collecteur a déjà moissonné, filtré sur
+      // la fenêtre de mise en ligne et trié. Voir `lib/lbc.ts` pour la raison —
+      // Datadome ferme la porte au client HTTP de Node.
+      //
+      // `isPokemonLot` s'applique néanmoins ici, et non côté collecteur : les
+      // trois sources doivent passer par la *même* règle, sous peine de voir
+      // leboncoin dériver le jour où la liste des mots de lot changera.
+      const items = await searchLbcRecents();
+      return {
+        items: items
+          .filter((item) => isPokemonLot(item.title))
+          .map((item) =>
+            toLot(item, null, "lbc", 0, {
+              // Seule source dont la provenance est connue sans lire le titre :
+              // leboncoin est franco-français. Le filtre « français uniquement »
+              // s'y fie directement, sans retomber sur la langue du titre.
+              country: "FR",
+              // Ni enchères ni ventes à durée limitée : tout y est à prix fixe.
+              auction: false,
+              bids: 0,
+              endsAt: null,
+            }),
+          ),
+        error: null,
+      };
+    }
+
     const pages = await Promise.all(
       RECENT_QUERIES.map((query) => searchEbay({ query, order: "newly_listed", perPage: 50 })),
     );
@@ -501,7 +554,7 @@ async function collectRecent(
       error: null,
     };
   } catch (error) {
-    const label = source === "vinted" ? "Vinted" : "eBay";
+    const label = SOURCE_NAMES[source];
     const message = error instanceof Error ? error.message : `Recherche ${label} impossible.`;
     return { items: [], error: `${label} : ${message}` };
   }
@@ -513,7 +566,13 @@ export async function refreshRecentLots(now = Date.now()): Promise<RecentLots> {
     const existing = await readRecentLots();
     if (recentsAreFresh(existing, now)) return existing as RecentLots;
 
-    const sources: Source[] = hasEbay() ? ["vinted", "ebay"] : ["vinted"];
+    // Leboncoin ne rejoint la liste que si un instantané exploitable existe :
+    // un projet qui n'a jamais lancé `collect/lbc.py` doit voir une source de
+    // moins, pas une erreur — exactement comme eBay sans clef d'API.
+    const sources: Source[] = ["vinted"];
+    if (hasEbay()) sources.push("ebay");
+    if (await hasLbc(now)) sources.push("lbc");
+
     const collected = await Promise.all(sources.map((source) => collectRecent(source)));
     const errors = collected.map((result) => result.error).filter((msg) => msg !== null);
 

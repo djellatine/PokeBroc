@@ -1,0 +1,8 @@
+# Dépendances du collecteur leboncoin (`collect/lbc.py`).
+#
+# `curl_cffi` est la raison d'être du script : il rejoue l'empreinte TLS de
+# Chrome, là où le `fetch` de Node se fait refuser par Datadome. `tzdata` est
+# nécessaire sous Windows, où Python ne trouve pas de base de fuseaux système —
+# `zoneinfo.ZoneInfo("Europe/Paris")` échouerait sans lui.
+curl_cffi>=0.7
+tzdata

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { CONDITION_LABELS } from "@/lib/match";
 import { age, countdown, euro, percent, plural } from "@/lib/format";
-import type { FeedCard, FeedItem, Source } from "@/lib/feed";
+import { SOURCE_NAMES, type FeedCard, type FeedItem, type Source } from "@/lib/feed";
 
 /**
  * Une annonce du fil, en ligne.
@@ -40,23 +40,31 @@ export function deviationStyle(vsMarket: number): string {
  * Exportée : la ligne et la vignette la posent toutes deux, et deux définitions
  * pour une même donnée divergeraient à la première retouche.
  */
-export const SOURCE_LABELS: Record<Source, string> = { vinted: "Vinted", ebay: "eBay" };
+export const SOURCE_LABELS = SOURCE_NAMES;
 
-const SOURCE_DOTS: Record<Source, string> = { vinted: "bg-teal-400", ebay: "bg-blue-400" };
+const SOURCE_DOTS: Record<Source, string> = {
+  vinted: "bg-teal-400",
+  ebay: "bg-blue-400",
+  lbc: "bg-orange-400",
+};
 
 /**
- * Les deux places de marché ne datent pas leurs annonces de la même façon :
- * eBay publie une vraie date de mise en ligne, Vinted n'expose que
+ * Les places de marché ne datent pas leurs annonces de la même façon : eBay et
+ * leboncoin publient une vraie date de mise en ligne, Vinted n'expose que
  * l'horodatage de la photo. Le libellé le dit, plutôt que d'afficher une
  * précision qu'on n'a pas.
  */
 export function postedHint(source: Source): string {
-  return source === "ebay" ? "Mise en ligne" : "Mise en ligne (horodatage de la photo)";
+  return source === "vinted" ? "Mise en ligne (horodatage de la photo)" : "Mise en ligne";
 }
 
-/** Le supplément n'est pas de même nature : port chez eBay, frais de service chez Vinted. */
+/**
+ * Le supplément n'est pas de même nature : frais de service chez Vinted, port
+ * ailleurs. Leboncoin ne chiffre ni l'un ni l'autre en recherche — le mode de
+ * remise se choisit à l'achat — donc le libellé n'y sert jamais.
+ */
 export function feesLabel(source: Source): string {
-  return source === "ebay" ? "de port" : "de frais";
+  return source === "vinted" ? "de frais" : "de port";
 }
 
 export function SourceChip({ source }: { source: Source }) {

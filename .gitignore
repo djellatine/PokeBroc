@@ -36,6 +36,10 @@ yarn-error.log*
 # comptes, favoris et clé de session (voir lib/store.ts)
 /.data/
 
+# bytecode du collecteur leboncoin (voir collect/lbc.py)
+__pycache__/
+*.pyc
+
 # vercel
 .vercel
 
