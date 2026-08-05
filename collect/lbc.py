@@ -17,9 +17,32 @@ Ce qu'il produit
 ----------------
 Un instantané `.data/lbc/recents.json` au format que `toLot()` attend déjà, lu
 par `lib/lbc.ts`. Le script n'est jamais appelé par le site : il tourne sur
-minuterie, et le site ne lit que le disque. C'est ce découplage qui rend la
-collecte gratuite — elle part d'une IP résidentielle, celle de la machine, là
-où un hébergeur ferait tomber Datadome dès la première requête.
+minuterie, et le site ne lit que le disque.
+
+Ce que coûte une IP de centre de données
+----------------------------------------
+Cet en-tête a longtemps affirmé qu'un hébergeur « ferait tomber Datadome dès la
+première requête ». C'était une intuition, pas une mesure, et elle est fausse.
+Mesuré le 5 août 2026 depuis un runner GitHub (AS8075 Microsoft, Virginie) :
+**six pages abouties**, 210 résultats récupérés, avant que Datadome escalade —
+et l'escalade porte sur `new_session()`, c'est-à-dire que la page d'accueil
+elle-même finit par rendre 403.
+
+Le blocage est donc **graduel** : il existe un budget de requêtes toléré, plus
+court depuis un centre de données que depuis la ligne d'un particulier. La même
+collecte depuis une IP résidentielle enchaîne ses quatre requêtes et sa dizaine
+de pages en 18,7 s sans incident.
+
+Deux inconnues restent, et il ne faut pas conclure sans elles :
+
+- le runner était **américain**, pour un site franco-français. Le pays et le
+  centre de données ont changé ensemble ; rien ne dit lequel des deux pèse.
+- `THROTTLE_S` vaut 2 s. Personne n'a mesuré si ralentir suffit à tenir dans le
+  budget d'une IP d'hébergeur.
+
+Tant que ces deux points ne sont pas tranchés, la minuterie tourne sur une
+machine à IP résidentielle — non parce que c'est prouvé nécessaire, mais parce
+que c'est la configuration dont on sait qu'elle marche.
 
 Pourquoi l'API mobile n'est pas utilisée
 ----------------------------------------

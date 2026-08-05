@@ -1,15 +1,20 @@
-# Répond à une seule question, et n'a pas vocation à rester.
+# Mesure ce que les catalogues font d'une IP de centre de données.
 #
-# L'en-tête de `collect/lbc.py` affirme qu'« un hébergeur ferait tomber
-# Datadome dès la première requête ». Le 403 du `fetch` de Node, lui, est
-# mesuré ; cette phrase-là ne l'est pas — c'est une justification de conception.
-# Tant qu'elle n'est pas vérifiée, on ne sait pas si le site peut être hébergé
-# ailleurs que sur une machine à IP résidentielle.
+# L'en-tête de `collect/lbc.py` affirmait qu'« un hébergeur ferait tomber
+# Datadome dès la première requête ». Ce workflow l'a démentie le 5 août 2026 :
+# six pages ont abouti depuis un runner GitHub — AS8075 Microsoft, Virginie —
+# soit 210 résultats, avant que Datadome escalade jusqu'à refuser la page
+# d'accueil elle-même. Le blocage est graduel, pas immédiat. Vinted, lui, rend
+# ses 48 annonces sur 960 exactement comme depuis une ligne de particulier.
 #
-# Ce workflow lance donc le collecteur depuis un runner GitHub, c'est-à-dire
-# une IP de datacenter, et rapporte ce que Datadome en fait. Vinted est sondé
-# dans la foulée, pour la même raison. eBay ne l'est pas : c'est une API
-# officielle avec des clés, la réputation de l'IP n'y joue aucun rôle.
+# eBay n'est pas sondé : c'est une API officielle avec des clés, où la
+# réputation de l'IP ne joue aucun rôle.
+#
+# Ce que ce sondage ne tranche pas : le runner est **américain**, pour un site
+# franco-français. Le pays et le centre de données ont changé ensemble, et rien
+# n'indique lequel des deux pèse. Un hébergeur français peut donc très bien
+# passer là où celui-ci échoue — c'est l'objet du sondage suivant, qui devra
+# compter les pages abouties plutôt que conclure par oui ou non.
 #
 # Lancement manuel : onglet Actions → « Sondage datacenter » → Run workflow.
 
@@ -109,8 +114,11 @@ jobs:
             echo "**Si les deux passent** : le site peut être hébergé entièrement dans le nuage,"
             echo "collecteur compris, et le PC peut rester éteint."
             echo ""
-            echo "**Si leboncoin est bloqué** : la phrase de l'en-tête était juste, et le collecteur"
-            echo "exige une IP résidentielle. Attention, un échec ici condamne aussi OVH, dont l'ASN"
-            echo "est plus surveillé que celui d'Azure ; l'inverse n'est pas vrai — un succès ici ne"
-            echo "garantit pas OVH."
+            echo "**Si leboncoin échoue**, lisez sa sortie avant de conclure — le nombre de pages"
+            echo "abouties avant le 403 est l'information utile, pas l'échec lui-même. Le blocage de"
+            echo "Datadome est graduel : six pages sont passées lors du sondage du 5 août 2026."
+            echo ""
+            echo "Et n'en déduisez rien sur un hébergeur français : ce runner est américain, pour un"
+            echo "site franco-français. Le pays et le centre de données changent ensemble ici, et ce"
+            echo "sondage ne sait pas dire lequel des deux pèse."
           } >> "$GITHUB_STEP_SUMMARY"

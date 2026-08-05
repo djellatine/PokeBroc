@@ -315,9 +315,31 @@ Le script est donc le seul morceau du projet qui ne soit pas en TypeScript, et i
 ce que le reste ne peut pas faire : récupérer, normaliser, écrire. `isPokemonLot`, `scoreLots` et
 `lotSize` restent dans `lib/match.ts`, appliqués aux trois places de marché par le même chemin.
 
-Ce découplage est aussi ce qui rend la collecte tenable : elle part de l'IP résidentielle de la
-machine, là où un hébergeur — IP de centre de données — se ferait bloquer dès la première requête.
 Le site, lui, ne lit que le disque et ne contacte jamais leboncoin.
+
+#### Ce que coûte une IP de centre de données, mesuré
+
+Ce paragraphe affirmait qu'un hébergeur « se ferait bloquer dès la première requête ». C'était une
+intuition, et elle est fausse. Sondage du 5 août 2026 depuis un runner GitHub — AS8075 Microsoft,
+Virginie — via `.github/workflows/sondage-datacenter.yml` :
+
+| | IP résidentielle | Runner GitHub (US) |
+| --- | --- | --- |
+| leboncoin | 4 requêtes, ~10 pages, 147 lots en 18,7 s | **6 pages**, 210 résultats, puis 403 |
+| Vinted | 48 annonces sur 960 | 48 annonces sur 960 |
+
+Deux enseignements. **Vinted ne dépend pas de l'IP** — c'est la source principale, et elle est
+tranquille. **Le blocage de Datadome est graduel** : il existe un budget de requêtes toléré, et
+l'escalade porte ensuite sur `new_session()`, si bien que la page d'accueil elle-même finit par
+rendre 403.
+
+Ce que le sondage ne dit *pas*, et qu'il ne faut pas conclure trop vite : le runner était américain,
+pour un site franco-français. Le pays et le centre de données ont changé ensemble, et rien n'indique
+lequel des deux pèse. Un hébergeur français reste donc à évaluer, tout comme le levier « ralentir » —
+`THROTTLE_S` vaut 2 s, ce qui est rapide pour une cible sous Datadome.
+
+En attendant, la minuterie tourne sur une machine à IP résidentielle : non parce que c'est prouvé
+nécessaire, mais parce que c'est la configuration dont on sait qu'elle marche.
 
 Deux conséquences à connaître :
 
