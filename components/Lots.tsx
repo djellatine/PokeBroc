@@ -69,7 +69,15 @@ const DEFAULT_PREFS: LotPrefs = {
   sized: false,
 };
 
-const PREFS_KEY = "pokebroc:lots";
+/**
+ * Le suffixe de version n'est pas décoratif : `usePersisted` fusionne la valeur
+ * enregistrée **par-dessus** les défauts, si bien qu'un `open: false` mémorisé
+ * du temps où la section était repliée survivait au changement de défaut. Ceux
+ * qui avaient déjà ouvert le site — les seuls à avoir un avis sur la question —
+ * étaient précisément ceux à qui la section restait invisible. Changer de clé
+ * les remet sur le défaut courant, au prix d'un tri à repositionner une fois.
+ */
+const PREFS_KEY = "pokebroc:lots:v2";
 
 const PAGE_SIZE = 24;
 
