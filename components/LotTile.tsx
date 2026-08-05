@@ -1,8 +1,6 @@
 "use client";
 
-import Link from "next/link";
 import { feesLabel, postedHint, SourceChip } from "@/components/OfferRow";
-import type { FeedCard } from "@/lib/feed";
 import { age, countdown, euro, plural } from "@/lib/format";
 import type { LotItem } from "@/lib/lots";
 import { CONDITION_LABELS } from "@/lib/match";
@@ -25,15 +23,7 @@ import { CONDITION_LABELS } from "@/lib/match";
 /** Étiquette posée sur la photo : elle doit tenir sur n'importe quel fond. */
 const OVERLAY = "rounded px-1.5 py-px text-[9px] font-bold uppercase tracking-wide backdrop-blur";
 
-export default function LotTile({
-  item,
-  card,
-  now,
-}: {
-  item: LotItem;
-  card: FeedCard | undefined;
-  now: number;
-}) {
+export default function LotTile({ item, now }: { item: LotItem; now: number }) {
   const posted = age(item.createdAt, now);
   const remaining = item.auction ? countdown(item.endsAt, now) : null;
   const total = item.totalPrice ?? item.price;
@@ -98,24 +88,10 @@ export default function LotTile({
           </a>
 
           {/* `mt-auto` colle le pied en bas : sans lui, des titres de une et de
-              deux lignes décalent le pied d'une vignette à l'autre. L'onglet
-              « Récents » ne part d'aucune carte, d'où la réserve vide plutôt
-              qu'un lien — sans quoi ses vignettes seraient plus courtes d'une
-              ligne que celles de l'autre onglet. */}
-          <div className="mt-auto pt-1">
-            {card && (
-              <Link
-                href={`/carte/${encodeURIComponent(card.cardId)}`}
-                className="block truncate text-[11px] font-semibold text-accent transition hover:underline"
-                title="Carte de votre collection à laquelle ce lot a été rattaché"
-              >
-                {card.name}
-                {card.localId && <span className="font-normal opacity-70"> n°{card.localId}</span>}
-              </Link>
-            )}
-          </div>
-
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-faint">
+              deux lignes décalent le pied d'une vignette à l'autre. Il portait
+              autrefois sur une réserve au-dessus, qui accueillait le nom de la
+              carte rattachée — la page ne rattache plus les lots à personne. */}
+          <div className="mt-auto flex flex-wrap items-center gap-x-2 gap-y-1 pt-1 text-[10px] text-faint">
             <SourceChip source={item.source} />
             {item.condition && <span>{CONDITION_LABELS[item.condition]}</span>}
             {posted && <span title={postedHint(item.source)}>{posted}</span>}

@@ -63,20 +63,14 @@ export interface FeedCard {
  * le réseau jusqu'au navigateur, et les champs inutilisés y coûteraient deux
  * fois.
  */
-export type Source = "vinted" | "ebay" | "lbc";
-
 /**
- * Nom d'affichage d'une place de marché.
- *
- * Ici plutôt que dans un composant : les messages d'erreur de collecte le
- * citent (« Vinted : … »), et ces messages naissent côté serveur, hors de
- * portée du dossier `components`.
+ * Réexporté pour les nombreux `import type { Source } from "./feed"` déjà en
+ * place. La définition vit dans `source.ts`, sans dépendance : voir son
+ * en-tête — l'importer *comme valeur* depuis ici entraînerait `node:fs/promises`
+ * dans le paquet client.
  */
-export const SOURCE_NAMES: Record<Source, string> = {
-  vinted: "Vinted",
-  ebay: "eBay",
-  lbc: "leboncoin",
-};
+import type { Source } from "./source";
+export type { Source };
 
 export interface FeedItem {
   /** Préfixé par la source : deux places de marché numérotent chacune de son côté. */
@@ -242,24 +236,26 @@ async function collect(
   source: Source,
   card: CardDetail,
   query: string,
+  /** Ignorer le cache de réponses des places de marché — voir `refreshCard`. */
+  live = false,
 ): Promise<{ items: PendingItem[]; error: string | null }> {
   try {
     // Les deux passes partent ensemble ; les clients les sérialisent de toute
     // façon, mais on n'attend pas la première pour poster la seconde.
     if (source === "vinted") {
-      const [relevant, fresh] = await Promise.all([
-        searchVinted({ query, order: "relevance", perPage: 48 }),
-        searchVinted({ query, order: "newest_first", perPage: 48 }),
+      const [relevant, newest] = await Promise.all([
+        searchVinted({ query, order: "relevance", perPage: 48, fresh: live }),
+        searchVinted({ query, order: "newest_first", perPage: 48, fresh: live }),
       ]);
-      const scored = scoreAll([...relevant.items, ...fresh.items], card);
+      const scored = scoreAll([...relevant.items, ...newest.items], card);
       return { items: scored.map((item) => fromVinted(item, card.id)), error: null };
     }
 
-    const [relevant, fresh] = await Promise.all([
-      searchEbay({ query, order: "best_match", perPage: 50 }),
-      searchEbay({ query, order: "newly_listed", perPage: 50 }),
+    const [relevant, newest] = await Promise.all([
+      searchEbay({ query, order: "best_match", perPage: 50, fresh: live }),
+      searchEbay({ query, order: "newly_listed", perPage: 50, fresh: live }),
     ]);
-    const scored = scoreAll([...relevant.items, ...fresh.items], card);
+    const scored = scoreAll([...relevant.items, ...newest.items], card);
     return { items: scored.map((item) => fromEbay(item, card.id)), error: null };
   } catch (error) {
     const label = source === "vinted" ? "Vinted" : "eBay";
@@ -274,11 +270,22 @@ async function collect(
  * Sérialisé par carte : deux visiteurs arrivant en même temps sur une carte
  * périmée ne déclenchent qu'une collecte, le second récupérant l'instantané que
  * le premier vient d'écrire.
+ *
+ * @param force Passer outre la validité de dix minutes. C'est ce que demande le
+ *              bouton « Actualiser » : sans lui, recharger la page pendant ces
+ *              dix minutes rendait invariablement le même instantané, et une
+ *              annonce parue entre-temps restait invisible sans qu'on puisse
+ *              rien y faire. Le délai entre deux forçages est tenu par la route,
+ *              qui seule connaît le demandeur.
  */
-export async function refreshCard(favorite: FavoriteCard, now = Date.now()): Promise<Snapshot> {
+export async function refreshCard(
+  favorite: FavoriteCard,
+  now = Date.now(),
+  force = false,
+): Promise<Snapshot> {
   return serialize(`feed:${favorite.cardId}`, async () => {
     const existing = await readSnapshot(favorite.cardId);
-    if (isFresh(existing, now)) return existing as Snapshot;
+    if (!force && isFresh(existing, now)) return existing as Snapshot;
 
     const card = await getCard(favorite.cardId);
     if (!card) {
@@ -307,7 +314,9 @@ export async function refreshCard(favorite: FavoriteCard, now = Date.now()): Pro
     // Sans clés eBay, le site fonctionne sur Vinted seul plutôt que de signaler
     // une erreur de collecte à chaque carte.
     const sources: Source[] = hasEbay() ? ["vinted", "ebay"] : ["vinted"];
-    const collected = await Promise.all(sources.map((source) => collect(source, card, query)));
+    const collected = await Promise.all(
+      sources.map((source) => collect(source, card, query, force)),
+    );
 
     const errors = collected.map((result) => result.error).filter((msg) => msg !== null);
 

@@ -63,12 +63,18 @@ export interface LbcSnapshot {
 /**
  * Au-delà, l'instantané n'est plus un flux de lots récents.
  *
- * Le double de la période de collecte visée (trois heures) : un passage manqué
- * reste tolérable — la minuterie a pu tomber pendant une mise en veille — mais
- * deux d'affilée signalent que la collecte ne tourne plus, et il vaut mieux ne
- * rien afficher qu'un « publié il y a 3 h » vieux d'une journée.
+ * Quatre fois la période de collecte, qui est passée de trois heures à quinze
+ * minutes. Quelques passages manqués restent tolérables — la minuterie tombe
+ * pendant une mise en veille — mais quatre d'affilée signalent que la collecte
+ * ne tourne plus, et il vaut mieux ne rien afficher qu'un « publié il y a 3 h »
+ * vieux d'une journée.
+ *
+ * La valeur précédente, six heures, était le double d'une collecte trihoraire.
+ * La garder aurait laissé passer pour « récent » un instantané de vingt-quatre
+ * passages de retard, là où le reste de la page se rafraîchit tous les quarts
+ * d'heure — un seuil de péremption doit suivre la cadence, pas la précéder.
  */
-export const LBC_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+export const LBC_MAX_AGE_MS = 60 * 60 * 1000;
 
 export async function readLbcSnapshot(): Promise<LbcSnapshot | null> {
   const snapshot = await readJson<LbcSnapshot>(FILE);

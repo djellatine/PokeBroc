@@ -8,7 +8,9 @@ import OfferRow from "@/components/OfferRow";
 import OfferTile from "@/components/OfferTile";
 import { useFrenchOnly } from "@/components/useFrenchOnly";
 import { usePersisted } from "@/components/usePersisted";
+import RefreshButton from "@/components/RefreshButton";
 import ViewSwitch, { LAYOUT, useView } from "@/components/ViewSwitch";
+import { FORCE_COOLDOWN_MS } from "@/lib/rate-limit";
 import type { FeedCard, FeedItem, Snapshot } from "@/lib/feed";
 import { percent, plural } from "@/lib/format";
 import { isForeignListing } from "@/lib/language";
@@ -102,6 +104,21 @@ export default function Dashboard({
   const [now, setNow] = useState(serverNow);
   const [, startTransition] = useTransition();
 
+  /**
+   * Cartes d'un rafraîchissement demandé à la main, `null` le reste du temps.
+   *
+   * Le rattrapage automatique ne porte que sur les cartes périmées ; « Actualiser »
+   * les reprend *toutes*, y compris celles dont l'instantané a deux minutes —
+   * c'est précisément pour celles-là qu'on clique.
+   */
+  const [forced, setForced] = useState<string[] | null>(null);
+
+  /**
+   * Secondes restantes avant de pouvoir recliquer. Décomptées en état plutôt
+   * que calculées depuis `Date.now()` au rendu, qui rendrait le composant impur.
+   */
+  const [cooldown, setCooldown] = useState(0);
+
   const staleKey = initialStaleIds.join("|");
 
   // La liste des cartes à rattraper a changé : on repart d'un avancement neuf.
@@ -113,7 +130,7 @@ export default function Dashboard({
     setSettled([]);
   }
 
-  const pending = initialStaleIds.filter((cardId) => !settled.includes(cardId));
+  const pending = (forced ?? initialStaleIds).filter((cardId) => !settled.includes(cardId));
 
   function update<K extends keyof Filters>(key: K, value: Filters[K]) {
     updateFilters({ [key]: value } as Partial<Filters>);
@@ -126,6 +143,53 @@ export default function Dashboard({
     const timer = setInterval(() => setNow(Date.now()), CLOCK_MS);
     return () => clearInterval(timer);
   }, []);
+
+  // Une seconde à la fois plutôt qu'une échéance comparée à l'horloge : le
+  // bouton affiche le décompte, et `now` ne bat qu'à la minute.
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const timer = setTimeout(() => setCooldown((seconds) => seconds - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [cooldown]);
+
+  /**
+   * Reprend toutes les cartes, sans égard pour la validité des instantanés.
+   *
+   * Le serveur tient le même délai de son côté (`FORCE_COOLDOWN_MS`) : le
+   * décompte affiché ici n'est qu'un confort, pas la garde.
+   */
+  function refreshAll() {
+    const ids = favorites.map((favorite) => favorite.cardId);
+    if (ids.length === 0) return;
+
+    setCooldown(Math.round(FORCE_COOLDOWN_MS / 1000));
+    setSettled([]);
+    setForced(ids);
+
+    let failures = 0;
+
+    void Promise.all(
+      ids.map(async (cardId) => {
+        try {
+          const res = await fetch(`/api/feed?cardId=${encodeURIComponent(cardId)}&force=1`);
+          const data = (await res.json()) as Snapshot & { error?: string };
+          if (!res.ok) throw new Error(data.error ?? "Recherche d’annonces impossible.");
+          setSnapshots((current) => ({ ...current, [cardId]: data }));
+        } catch (err) {
+          failures += 1;
+          setError(err instanceof Error ? err.message : "Recherche d’annonces impossible.");
+        } finally {
+          setSettled((current) => [...current, cardId]);
+        }
+      }),
+    ).then(() => {
+      if (failures < ids.length) setError(null);
+      // Rendre la main au rattrapage automatique : sans ça, une carte ajoutée
+      // plus tard resterait hors du décompte d'avancement.
+      setForced(null);
+      setNow(Date.now());
+    });
+  }
 
   useEffect(() => {
     const ids = staleKey ? staleKey.split("|") : [];
@@ -380,6 +444,17 @@ export default function Dashboard({
                 {favorites.length - pending.length} / {favorites.length}
               </span>
             )}
+            {/* Le seul geste du site qui interroge les catalogues sur commande.
+                Il existe parce que recharger la page ne suffisait pas : tant
+                qu'un instantané a moins de dix minutes, le serveur le rend tel
+                quel, et une annonce parue entre-temps restait inaccessible. */}
+            <RefreshButton
+              onClick={refreshAll}
+              loading={loading}
+              cooldown={cooldown}
+              disabled={favorites.length === 0}
+            />
+
             {stats.fresh > 0 && (
               <button type="button" onClick={markSeen} className="control">
                 Tout marquer comme vu

@@ -32,6 +32,22 @@ export interface RateLimitResult {
 }
 
 /**
+ * Délai minimal entre deux rafraîchissements demandés à la main.
+ *
+ * Le bouton « Actualiser » saute le contrôle de fraîcheur : un clic répété
+ * enverrait donc deux requêtes par carte suivie à chaque fois, sans plafond.
+ * Trente secondes est ce qu'il faut pour que le geste reste utile — une annonce
+ * qui vient de paraître n'attend pas — sans transformer un doigt nerveux en
+ * robot d'interrogation.
+ *
+ * Exportée d'ici plutôt que dupliquée : les deux routes l'appliquent et les
+ * deux boutons l'affichent, et deux valeurs pour un même délai divergeraient à
+ * la première retouche. Ce module ne dépend d'aucune API de Node, il peut donc
+ * être lu depuis un composant client.
+ */
+export const FORCE_COOLDOWN_MS = 30_000;
+
+/**
  * Consomme un jeton pour `key`.
  *
  * @param limit    Jetons disponibles à plein.

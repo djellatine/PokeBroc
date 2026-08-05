@@ -29,6 +29,16 @@ export interface VintedSearchParams {
   order?: VintedOrder;
   priceFrom?: number;
   priceTo?: number;
+  /**
+   * Ignorer le cache de réponses, sans cesser de l'alimenter.
+   *
+   * Réservé au bouton « Actualiser ». Sans ce drapeau, forcer la collecte ne
+   * servait à rien pendant quatre-vingt-dix secondes : `refreshCard` relançait
+   * bien la recherche, mais elle ressortait d'ici inchangée — et l'annonce
+   * qu'on venait voir restait invisible. Le délai entre deux forçages borne le
+   * contournement à un par carte et par trente secondes.
+   */
+  fresh?: boolean;
 }
 
 export interface VintedItem {
@@ -267,7 +277,10 @@ export async function searchVinted(params: VintedSearchParams): Promise<VintedSe
   }
 
   const url = buildUrl({ ...params, query });
-  const cached = cacheGet(url);
+  // Le résultat sera écrit dans le cache dans tous les cas : `fresh` court-circuite
+  // la lecture, pas l'alimentation. Le visiteur qui force paie l'aller-retour,
+  // les suivants en profitent.
+  const cached = params.fresh ? null : cacheGet(url);
   if (cached) return cached;
 
   const result = await schedule(async () => {

@@ -55,28 +55,37 @@ pas pour qui cherche un lot. Pire, il les rend **invisibles** : un titre comme `
 Pokémon dont Dracaufeu` vaut 4 − 2 = 2, sous le seuil large, et n'atteint donc jamais le disque.
 Les gros lots — ceux qui ne citent ni numéro ni extension — étaient structurellement absents.
 
-La page **Mes lots** (`/lots`, `lib/lots.ts`) les collecte donc à part, en deux onglets qui
-répondent à deux questions opposées : **Récents**, le flux de ce qui vient d'être mis en ligne, et
-**Ma collection**, les lots dont le titre cite une carte suivie.
+La page **Lots** (`/lots`, `lib/lots.ts`) les collecte donc à part : **tous** les lots Pokémon des
+trois places de marché, les derniers mis en ligne en tête. On recharge la page, les derniers
+arrivent.
 
-Deux routes, et non deux vues d'un même fil : la bascule `Mes cartes` / `Mes lots` de l'en-tête
-(`components/ModeSwitch.tsx`) change de page. Les lots ont d'abord vécu en section sous le fil, et
-l'endroit les condamnait — sur une collection de douze cartes, il fallait descendre **cinq écrans et
-demi** pour les atteindre. Pire, la section était repliable, et repliée elle ne rendait pas même ses
-onglets : une préférence `open: false` enregistrée du temps où elle l'était par défaut survivait au
-changement de défaut, `usePersisted` fusionnant la valeur stockée par-dessus. Les seuls à avoir déjà
-ouvert le site étaient donc précisément ceux à qui la section restait invisible.
+Deux routes, et non deux vues d'un même fil : la bascule `Mes cartes` / `Lots` de l'en-tête
+(`components/ModeSwitch.tsx`) change de page. L'asymétrie des libellés est le message — l'une part
+de votre collection, l'autre non. Les lots ont d'abord vécu en section sous le fil, et l'endroit les
+condamnait : sur une collection de douze cartes, il fallait descendre **cinq écrans et demi** pour
+les atteindre. Pire, la section était repliable, et repliée elle ne rendait pas même ses onglets —
+une préférence `open: false` enregistrée du temps où elle l'était par défaut survivait au changement
+de défaut, `usePersisted` fusionnant la valeur stockée par-dessus. Les seuls à avoir déjà ouvert le
+site étaient donc précisément ceux à qui la section restait invisible.
 
-Le partage par route n'est pas qu'un rangement : la page des cartes ne lit plus un seul instantané
-de lot, et `/lots` ne rend pas les cent trente-cinq annonces du fil.
+#### Arriver tôt
 
-#### Onglet « Récents » — arriver tôt
+C'est l'inverse exact de tout le reste du site : **on ne part d'aucune carte**. Un lot ne dit pas ce
+qu'il contient, et le vendeur qui liquide un classeur au poids ne le sait pas toujours lui-même —
+c'est précisément ce qui en fait une affaire. La seule chose qui compte est donc d'arriver avant les
+autres, d'où un tri par date de mise en ligne et non par pertinence, et les tris `newest_first` /
+`newly_listed` côté catalogues.
 
-C'est l'onglet par défaut, et l'inverse exact de tout le reste du site : **on ne part d'aucune
-carte**. Un lot ne dit pas ce qu'il contient, et le vendeur qui liquide un classeur au poids ne le
-sait pas toujours lui-même — c'est précisément ce qui en fait une affaire. La seule chose qui compte
-est donc d'arriver avant les autres, d'où un tri par date de mise en ligne et non par pertinence, et
-les tris `newest_first` / `newly_listed` côté catalogues.
+Un onglet « Ma collection » a vécu ici, qui rassemblait les lots dont le titre citait une carte
+suivie. Il a été retiré, parce qu'il répondait à une question à laquelle le fil de la page d'accueil
+répond déjà : un lot qui nomme une carte suivie y remonte par la notation ordinaire, et le bouton
+**Sans lots** sert à les masquer. Deux chemins pour une même chose, dont l'un coûtait quatre
+recherches *par carte suivie* — et émettait `lot cartes Set de Base` autant de fois qu'il y avait de
+cartes de cette extension dans la collection.
+
+`scoreLot`, `scoreLots`, `LOT_SCORE` et `lotQueries` restent dans `match.ts`, sans appelant : ils
+servaient cet onglet, et resserviront à un filtre « ne montrer que les lots contenant telle carte »
+posé sur la liste unique.
 
 Sans carte de référence, la notation ne s'applique plus : il faut trancher sur le titre nu
 (`isPokemonLot`). Trois conditions, dont la première n'a rien de théorique — interrogé avec
@@ -93,33 +102,24 @@ prix par carte — mesuré sur le flux réel : `Lot 270 Cartes Code Pokémon` à
 devant `Gros lot 451 cartes Pokémon Rivalités Destinées` à 0,06 €.
 
 Un seul instantané, partagé par tout le site, valable un quart d'heure : les requêtes ne dépendent
-d'aucune collection. **Huit recherches** par quart d'heure pour l'ensemble des visiteurs, là où
-l'onglet « Ma collection » en coûte quatre *par carte suivie*. La fraîcheur y est le produit, d'où une
-validité plus courte que partout ailleurs.
+d'aucune collection. **Douze recherches** par quart d'heure pour l'ensemble des visiteurs, quel que
+soit le nombre de comptes et de cartes épinglées. La fraîcheur y est le produit, d'où une validité
+plus courte que partout ailleurs.
 
-Relevé sur une collecte réelle : 120 lots retenus (43 Vinted, 77 eBay), tous datés, les plus récents
-mis en ligne **une minute plus tôt**, et 74 annonçant une quantité.
-
-#### Onglet « Ma collection » — savoir ce qu'on cherche
-
-Plus ciblé, forcément plus étroit : un lot de trois cents cartes ne nomme personne. Il ne s'appelle
-pas « Vos cartes » : `Mes cartes`, dans l'en-tête, désigne l'autre fil du site, et deux libellés
-voisins pour deux choses différentes à trente pixels l'un de l'autre ne pouvaient que se confondre.
-Trois différences avec le fil :
+Trois différences avec le fil des cartes :
 
 | | Fil des cartes | Page Lots |
 | --- | --- | --- |
-| Requête | `Dracaufeu 4/102` | `lot Dracaufeu`, `lot cartes Set de Base` |
-| Mot « lot » | −2 | +3, et **éliminatoire** en son absence |
-| Reproduction | −8 | éliminatoire |
-| Validité de l'instantané | 10 min | 30 min |
+| Requête | `Dracaufeu 4/102` | `lot cartes pokemon`, `vrac cartes pokemon`… |
+| Point de départ | votre collection | aucun |
+| Validité de l'instantané | 10 min | 15 min |
 | Écart à la cote | affiché | jamais |
 
-Le seuil de rétention (6) se lit « c'est bien un lot, **et** quelque chose le rattache à la carte
-suivie » : sans cette seconde condition, l'onglet afficherait le même vrac générique pour toutes les
-cartes de la collection.
+Relevé sur une collecte réelle : 120 lots retenus (43 Vinted, 77 eBay), tous datés, les plus récents
+mis en ligne **une minute plus tôt**, et 74 annonçant une quantité. Leboncoin en apporte une
+cinquantaine de plus par passage.
 
-Les deux onglets se lisent en liste ou en **grille**, sous la même préférence que le fil des cartes
+La page se lit en liste ou en **grille**, sous la même préférence que le fil des cartes
 (`components/ViewSwitch.tsx`) : c'est un réglage sur la forme des annonces, pas sur leur contenu, et
 deux réglages homonymes à régler séparément se seraient surtout fait oublier l'un des deux. La photo
 compte davantage ici que partout ailleurs — le titre d'un lot ment par omission, `Lot de 300 cartes
@@ -138,11 +138,11 @@ plutôt que deviné, et ces lots-là se classent en queue.
 Les enchères en cours n'en ont pas non plus : leur prix n'est pas un prix demandé, et il baisserait
 mécaniquement le classement de tous les lots à prix fixe.
 
-La collecte ne part qu'une fois l'onglet ouvert. Elle vaut deux requêtes par place de marché et par
-carte, soit quatre-vingts recherches pour vingt cartes suivies — les lancer au chargement de la page
-d'accueil, que l'on regarde à chaque visite, serait indéfendable vis-à-vis des catalogues. C'est ce
-qui rend la route séparée pertinente au-delà de l'ergonomie : on n'arrive sur `/lots` qu'en le
-demandant, et la dépense devient volontaire. Ce qui est déjà sur le disque s'affiche immédiatement.
+La collecte ne part qu'une fois la page ouverte, et seulement si l'instantané a plus d'un quart
+d'heure. La lancer au chargement de la page d'accueil, que l'on regarde à chaque visite, serait
+indéfendable vis-à-vis des catalogues. C'est ce qui rend la route séparée pertinente au-delà de
+l'ergonomie : on n'arrive sur `/lots` qu'en le demandant, et la dépense devient volontaire. Ce qui
+est déjà sur le disque s'affiche immédiatement.
 
 ### Le texte de la requête compte, même si Vinted l'ignore
 
@@ -448,7 +448,7 @@ plutôt que de réécrire tout `lib/` pour satisfaire le lanceur de tests.
 ```
 app/
   page.tsx                  accueil : présentation, ou fil des cartes suivies
-  lots/page.tsx             l'autre fil : les lots, en deux onglets
+  lots/page.tsx             l'autre fil : tous les lots des trois places de marché
   layout.tsx                en-tête avec recherche permanente
   robots.ts, sitemap.ts     référencement des fiches cartes
   connexion/, inscription/  formulaires de compte
@@ -458,15 +458,14 @@ app/
   api/cards/route.ts        proxy TCGdex + préchauffage des visuels
   api/carte-image/route.ts  visuels servis depuis le cache disque
   api/feed/route.ts         rafraîchissement d'une carte du fil
-  api/lots/route.ts         rafraîchissement des lots d'une carte
-  api/lots/recents/route.ts flux des lots Pokémon récemment mis en ligne
+  api/lots/recents/route.ts rafraîchissement du flux des lots
   api/vinted/route.ts       recherche Vinted + notation (fiche carte)
 proxy.ts                    limitation de débit devant /api/*
 components/
   Dashboard.tsx             collection, filtres et fil — l'état partagé de l'accueil
-  Lots.tsx                  page des lots : onglets Récents / Ma collection
+  Lots.tsx                  page des lots : liste unique, tri et filtres
   LotTile.tsx               un lot, en vignette (prix par carte sur la photo)
-  ModeSwitch.tsx            bascule Mes cartes / Mes lots, dans l'en-tête
+  ModeSwitch.tsx            bascule Mes cartes / Lots, dans l'en-tête
   ViewSwitch.tsx            liste ou grille, préférence partagée par les deux fils
   OfferRow.tsx              une annonce, en ligne
   CardSearch.tsx            barre de recherche et aperçu clavier
@@ -513,15 +512,15 @@ tests/                      node:test — match, rate-limit, sightings, format
   des mots qui signalent un lot. Un « Coffret Méga-Latias-ex (4 boosters) » y figure donc, sans
   quantité de cartes annoncée, donc sans prix par carte. C'est adjacent à ce qu'on cherche plutôt
   que faux, mais ce n'est pas un lot de cartes.
-- Un lot est rattaché à une carte parce que son titre la cite, elle ou son extension. Rien ne
-  garantit qu'elle soit réellement dedans : `lot cartes Set de Base` en dit autant sur son contenu
-  que le vendeur a bien voulu en dire.
+- La page Lots ne dit rien du contenu réel d'un lot. `Lot de 300 cartes Pokémon` en dit autant que
+  le vendeur a bien voulu en dire — c'est même la raison d'être de la page, mais cela vaut d'être
+  su avant d'acheter.
 - La traduction des symboles vaut pour la recherche d'**annonces**, pas pour la recherche de
   **cartes** de l'en-tête : celle-ci interroge TCGdex, qui ne connaît que le nom officiel. Taper
   `dracaufeu gold star` n'y trouve rien ; `dracaufeu` remonte la carte, symbole compris.
 - Les lots leboncoin ne se rafraîchissent pas à la demande : le site affiche ce que la dernière
-  minuterie a déposé. Un visiteur ne peut pas rattraper une collecte en retard, et un serveur
-  hébergé ne peut pas collecter du tout — l'IP d'un centre de données est bloquée d'emblée.
+  minuterie a déposé, et un visiteur ne peut pas rattraper une collecte en retard. Depuis un
+  hébergeur, le budget de requêtes toléré est nettement plus court — voir la mesure plus haut.
 - `collect/lbc.py` ne recherche pas « lot pokemon » sans le mot « cartes », là où le flux Vinted le
   fait : sur leboncoin cette requête rend surtout des peluches, des jouets et des vêtements. Le
   catalogue de Vinted, déjà celui d'une brocante de mode, restait exploitable ; celui de leboncoin
@@ -534,6 +533,6 @@ tests/                      node:test — match, rate-limit, sightings, format
 Alertes par e-mail sous un prix cible, autres jeux (Yu-Gi-Oh!, One Piece), et un rafraîchisseur en
 tâche de fond qui balaierait l'union des cartes suivies sans attendre qu'un visiteur passe.
 
-Leboncoin n'alimente aujourd'hui que le flux des lots récents. L'étendre aux lots *par carte*
-suivie demanderait de passer les requêtes de `lotQueries` au collecteur, qui ne connaît rien de la
-collection — c'est la seule chose que le découplage rend malcommode.
+Côté lots, le filtre « ne montrer que les lots contenant telle carte » est la suite naturelle : la
+notation existe déjà (`scoreLot`, `lotQueries`), il ne lui manque qu'un sélecteur au-dessus de la
+liste. Posé là plutôt que dans la collecte, il ne coûte aucune requête supplémentaire.

@@ -29,14 +29,15 @@ describe("lbcIsUsable", () => {
     assert.equal(lbcIsUsable(snapshot(), NOW), true);
   });
 
-  it("accepte un passage manqué", () => {
-    // La minuterie vise trois heures ; une machine en veille en saute un.
-    // Tolérer ce cas évite de faire disparaître la section pour rien.
-    const missed = snapshot({ at: NOW - 4 * 3600_000 });
+  it("accepte quelques passages manqués", () => {
+    // La minuterie vise le quart d'heure ; une machine en veille en saute
+    // plusieurs d'affilée. Tolérer ce cas évite de faire disparaître la source
+    // pour rien — trois passages manqués restent en deçà du seuil.
+    const missed = snapshot({ at: NOW - 45 * 60_000 });
     assert.equal(lbcIsUsable(missed, NOW), true);
   });
 
-  it("rejette au-delà de deux passages manqués", () => {
+  it("rejette au-delà de quatre passages manqués", () => {
     const abandoned = snapshot({ at: NOW - LBC_MAX_AGE_MS - 1 });
     assert.equal(lbcIsUsable(abandoned, NOW), false);
   });

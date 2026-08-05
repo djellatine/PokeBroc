@@ -42,6 +42,11 @@ export interface EbaySearchParams {
   /** Restreint aux objets situés dans ce pays (« FR »). */
   country?: string;
   marketplace?: string;
+  /**
+   * Ignorer le cache de réponses, sans cesser de l'alimenter. Réservé au bouton
+   * « Actualiser » — voir `VintedSearchParams.fresh`, même raison.
+   */
+  fresh?: boolean;
 }
 
 /**
@@ -368,7 +373,8 @@ export async function searchEbay(params: EbaySearchParams): Promise<EbaySearchRe
   const url = buildUrl({ ...params, query });
   const key = `${marketplace} ${url}`;
 
-  const cached = cacheGet(key);
+  // `fresh` court-circuite la lecture du cache, pas son alimentation.
+  const cached = params.fresh ? null : cacheGet(key);
   if (cached) return cached;
 
   const result = await schedule(async () => {

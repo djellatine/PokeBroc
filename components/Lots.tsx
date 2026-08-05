@@ -1,42 +1,36 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import LotTile from "@/components/LotTile";
 import { SourceChip, feesLabel, postedHint } from "@/components/OfferRow";
+import RefreshButton from "@/components/RefreshButton";
 import { useFrenchOnly } from "@/components/useFrenchOnly";
 import { usePersisted } from "@/components/usePersisted";
 import ViewSwitch, { LAYOUT, type View, useView } from "@/components/ViewSwitch";
-import type { FeedCard } from "@/lib/feed";
 import { age, countdown, euro, plural } from "@/lib/format";
 import { isForeignListing } from "@/lib/language";
-import type { LotItem, LotSnapshot, RecentLots } from "@/lib/lots";
+import { FORCE_COOLDOWN_MS } from "@/lib/rate-limit";
+import type { LotItem, RecentLots } from "@/lib/lots";
 import { CONDITION_LABELS } from "@/lib/match";
-import type { FavoriteCard } from "@/lib/store";
 
 /**
- * La page « Mes lots », en deux onglets qui répondent à deux questions opposées.
+ * La page « Lots » : tous les lots Pokémon des trois places de marché.
  *
- * **Récents** — les lots Pokémon qui viennent d'être mis en ligne, toutes
- * cartes confondues. C'est là que se font les affaires : un gros lot ne dit pas
- * ce qu'il contient, et le vendeur qui liquide un classeur au poids ne le sait
- * pas toujours lui-même. La seule chose qui compte est d'arriver tôt, d'où le
- * tri par date et non par pertinence.
+ * On ne part d'aucune carte, et c'est le principe même de la page. Un gros lot
+ * ne dit pas ce qu'il contient — le vendeur qui liquide un classeur au poids ne
+ * le sait pas toujours lui-même — donc filtrer sur une carte de la collection
+ * ne retiendrait que les lots assez petits pour se nommer, c'est-à-dire les
+ * moins intéressants. La seule chose qui compte est d'arriver tôt, d'où un tri
+ * par date de mise en ligne et non par pertinence.
  *
- * **Ma collection** — les lots dont le titre cite une carte suivie. Plus ciblé,
- * mais forcément plus étroit : un lot de trois cents cartes ne nomme personne.
- * L'onglet ne s'appelle pas « Vos cartes » : « Mes cartes », dans l'en-tête,
- * désigne l'autre fil du site, et deux libellés voisins pour deux choses
- * différentes à trente pixels l'un de l'autre ne pouvaient que se confondre.
- *
- * Une page à part, et non plus une section sous le fil : elle était alors
- * repliable, et repliée elle ne rendait pas même ses onglets. Les deux onglets
- * ne coûtent d'ailleurs pas la même chose : le flux récent vaut huit recherches
- * pour tout le site, les lots par carte quatre **par carte suivie** — mais on
- * n'arrive plus ici que sur demande, ce qui rend cette dépense volontaire.
+ * Un onglet « Ma collection » a existé ici, qui rassemblait les lots dont le
+ * titre citait une carte suivie. Il a été retiré : le fil de la page d'accueil
+ * fait déjà exactement cela, et mieux — un lot qui nomme une carte suivie y
+ * remonte par la notation ordinaire, et le bouton « Sans lots » sert à les
+ * masquer. Deux chemins pour une même question, dont l'un coûtait quatre
+ * recherches **par carte suivie**.
  */
 
-type Tab = "recents" | "cards";
 type LotSort = "date" | "perCard" | "price";
 
 const SORTS: { value: LotSort; label: string }[] = [
@@ -46,131 +40,69 @@ const SORTS: { value: LotSort; label: string }[] = [
 ];
 
 interface LotPrefs {
-  tab: Tab;
-  /** Un tri par onglet : « récents » veut une date, « vos cartes » un prix. */
-  sortRecent: LotSort;
-  sortCards: LotSort;
+  sort: LotSort;
   /** N'afficher que les lots dont le titre annonce un nombre de cartes. */
   sized: boolean;
 }
 
-/**
- * Constante de module : c'est la clé de mémoïsation de `usePersisted`.
- *
- * Il n'y a plus de préférence d'ouverture. Elle a existé, pour épargner des
- * requêtes aux catalogues, et le résultat était une ligne de dix pixels en bas
- * d'un fil de cent trente-cinq annonces que personne n'atteignait. L'économie
- * n'en était pas une : l'onglet par défaut coûte huit recherches par quart
- * d'heure **pour tout le site**, puisque son instantané ne dépend d'aucune
- * collection.
- */
+/** Constante de module : c'est la clé de mémoïsation de `usePersisted`. */
 const DEFAULT_PREFS: LotPrefs = {
-  tab: "recents",
-  sortRecent: "date",
-  sortCards: "perCard",
+  // La date, parce que c'est ce que la page promet : les derniers mis en ligne.
+  sort: "date",
   sized: false,
 };
 
 /**
  * Le suffixe de version n'est pas décoratif : `usePersisted` fusionne la valeur
- * enregistrée **par-dessus** les défauts, si bien qu'un `open: false` mémorisé
- * du temps où la section était repliée survivait au changement de défaut. Ceux
- * qui avaient déjà ouvert le site — les seuls à avoir un avis sur la question —
- * étaient précisément ceux à qui la section restait invisible. Changer de clé
- * les remet sur le défaut courant, au prix d'un tri à repositionner une fois.
+ * enregistrée **par-dessus** les défauts. Un `tab: "cards"` mémorisé du temps
+ * des onglets survivrait donc au retrait de l'onglet, et `sortRecent` ne
+ * s'appelle plus ainsi. Changer de clé remet tout le monde sur le défaut
+ * courant, au prix d'un tri à repositionner une fois.
  */
-const PREFS_KEY = "pokebroc:lots:v2";
+const PREFS_KEY = "pokebroc:lots:v3";
 
 const PAGE_SIZE = 24;
 
 export default function Lots({
-  favorites,
-  initialSnapshots,
-  initialStaleIds,
   initialRecent,
   recentIsStale,
   serverNow,
 }: {
-  favorites: FavoriteCard[];
-  initialSnapshots: LotSnapshot[];
-  initialStaleIds: string[];
   initialRecent: RecentLots | null;
   recentIsStale: boolean;
   serverNow: number;
 }) {
   const [prefs, updatePrefs] = usePersisted(PREFS_KEY, DEFAULT_PREFS);
 
-  // Normalisés plutôt que lus tels quels : les valeurs viennent de
-  // `localStorage`, où une clé inconnue est toujours possible.
-  const tab: Tab = prefs.tab === "cards" ? "cards" : "recents";
-
   return (
     <section className="flex flex-col gap-3">
       {/* Collé sous l'en-tête, comme la barre d'outils du fil : sur une page de
-          cent lots, changer d'onglet imposerait sinon de remonter tout en haut. */}
+          cent lots, le titre disparaîtrait sinon dès le premier défilement. */}
       <div className="sticky top-14 z-20 -mx-4 flex flex-wrap items-center gap-2 border-b border-line bg-bg/95 px-4 py-2 backdrop-blur">
         <h1 className="mr-1 text-sm font-bold">
           Lots
           <span className="ml-2 text-[11px] font-normal text-faint">
-            {tab === "recents"
-              ? "les derniers mis en ligne, toutes cartes confondues"
-              : "ceux dont le titre cite une de vos cartes"}
+            les derniers mis en ligne sur Vinted, eBay et leboncoin
           </span>
         </h1>
-
-        <div
-          role="group"
-          aria-label="Onglets des lots"
-          className="flex h-8 items-center gap-0.5 rounded-lg border border-line bg-panel-2 p-0.5"
-        >
-          <TabButton
-            active={tab === "recents"}
-            onClick={() => updatePrefs({ tab: "recents" })}
-            hint="Les lots Pokémon qui viennent d’être mis en ligne, toutes cartes confondues"
-          >
-            Récents
-          </TabButton>
-          <TabButton
-            active={tab === "cards"}
-            onClick={() => updatePrefs({ tab: "cards" })}
-            hint="Les lots dont le titre cite une carte de votre collection"
-          >
-            Ma collection
-          </TabButton>
-        </div>
       </div>
 
-      {tab === "recents" && (
-        <RecentPanel
-          initial={initialRecent}
-          isStale={recentIsStale}
-          sort={prefs.sortRecent}
-          onSort={(value) => updatePrefs({ sortRecent: value })}
-          sized={prefs.sized}
-          onSized={(value) => updatePrefs({ sized: value })}
-          serverNow={serverNow}
-        />
-      )}
-
-      {tab === "cards" && (
-        <CardsPanel
-          favorites={favorites}
-          initialSnapshots={initialSnapshots}
-          initialStaleIds={initialStaleIds}
-          sort={prefs.sortCards}
-          onSort={(value) => updatePrefs({ sortCards: value })}
-          sized={prefs.sized}
-          onSized={(value) => updatePrefs({ sized: value })}
-          serverNow={serverNow}
-        />
-      )}
+      <LotsPanel
+        initial={initialRecent}
+        isStale={recentIsStale}
+        sort={prefs.sort}
+        onSort={(value) => updatePrefs({ sort: value })}
+        sized={prefs.sized}
+        onSized={(value) => updatePrefs({ sized: value })}
+        serverNow={serverNow}
+      />
     </section>
   );
 }
 
-/* ------------------------------------------------------------ lots récents */
+/* -------------------------------------------------------------------- liste */
 
-function RecentPanel({
+function LotsPanel({
   initial,
   isStale,
   sort,
@@ -196,13 +128,13 @@ function RecentPanel({
   const [limit, setLimit] = useState(PAGE_SIZE);
   const [frenchOnly] = useFrenchOnly();
   const [view, setView] = useView();
+  /** Secondes restantes avant de pouvoir relancer une collecte à la main. */
+  const [cooldown, setCooldown] = useState(0);
 
   /**
-   * L'onglet n'est monté que déplié : la collecte peut donc partir d'un effet
-   * sans condition d'ouverture. Elle ne part qu'une fois — replier puis
-   * déplier remonte le composant, mais l'instantané reçu est alors frais et
-   * `isStale` reflète l'état du serveur au chargement de la page, pas celui
-   * d'après collecte. D'où le garde-fou sur `snapshot`.
+   * La mise à jour part au montage, donc à chaque chargement de la page — et
+   * seulement si le serveur a jugé son instantané périmé. C'est tout ce que la
+   * page promet : on recharge, les derniers lots arrivent.
    */
   useEffect(() => {
     if (!isStale) return;
@@ -228,6 +160,37 @@ function RecentPanel({
     return () => controller.abort();
   }, [isStale]);
 
+  // Une seconde à la fois plutôt qu'une échéance comparée à l'horloge : le
+  // bouton affiche le décompte, et lire `Date.now()` au rendu rendrait le
+  // composant impur.
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const timer = setTimeout(() => setCooldown((seconds) => seconds - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [cooldown]);
+
+  /**
+   * Relance la collecte sans égard pour la validité du quart d'heure.
+   *
+   * Contrairement au fil des cartes, un seul appel suffit : l'instantané des
+   * lots est unique et partagé par tout le site.
+   */
+  async function refreshNow() {
+    setCooldown(Math.round(FORCE_COOLDOWN_MS / 1000));
+    setLoading(true);
+    try {
+      const res = await fetch("/api/lots/recents?force=1");
+      const data = (await res.json()) as RecentLots & { error?: string };
+      if (!res.ok) throw new Error(data.error ?? "Recherche de lots impossible.");
+      setSnapshot(data);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Recherche de lots impossible.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   const { rows, hiddenByLanguage, hiddenBySize } = useFiltered(
     snapshot?.items ?? [],
     { frenchOnly, sized, sort },
@@ -239,11 +202,11 @@ function RecentPanel({
   return (
     <>
       <p className="text-[11px] leading-relaxed text-faint">
-        Les lots Pokémon qui viennent d’être mis en ligne, sans rapport avec votre collection —
+        Tous les lots Pokémon des trois places de marché, sans rapport avec votre collection —
         c’est le principe&nbsp;: un lot ne dit pas ce qu’il contient, et le vendeur qui liquide un
         classeur au poids ne le sait pas toujours. Vinted et eBay sont interrogés par leur tri
-        « plus récentes », et seules les annonces qui parlent à la fois de Pokémon et d’un lot sont
-        gardées.
+        « plus récentes », leboncoin par un collecteur séparé, et seules les annonces qui parlent à
+        la fois de Pokémon et d’un lot sont gardées.
         {collected && <span> Dernière collecte&nbsp;: il y a {collected}.</span>}
       </p>
 
@@ -261,6 +224,9 @@ function RecentPanel({
         count={rows.length}
         view={view}
         onView={setView}
+        onRefresh={refreshNow}
+        loading={loading}
+        cooldown={cooldown}
       />
 
       {error && <ErrorNote>{error}</ErrorNote>}
@@ -279,7 +245,6 @@ function RecentPanel({
         <Rows
           items={visible}
           total={rows.length}
-          cards={{}}
           now={serverNow}
           view={view}
           onMore={() => setLimit((current) => current + PAGE_SIZE)}
@@ -289,172 +254,6 @@ function RecentPanel({
       {rows.length === 0 && !loading && (
         <p className="panel px-4 py-8 text-center text-sm text-dim">
           Aucun lot Pokémon récent pour le moment. Réessayez dans un quart d’heure.
-        </p>
-      )}
-    </>
-  );
-}
-
-/* ------------------------------------------------------- lots de vos cartes */
-
-function CardsPanel({
-  favorites,
-  initialSnapshots,
-  initialStaleIds,
-  sort,
-  onSort,
-  sized,
-  onSized,
-  serverNow,
-}: {
-  favorites: FavoriteCard[];
-  initialSnapshots: LotSnapshot[];
-  initialStaleIds: string[];
-  sort: LotSort;
-  onSort: (value: LotSort) => void;
-  sized: boolean;
-  onSized: (value: boolean) => void;
-  serverNow: number;
-}) {
-  const [snapshots, setSnapshots] = useState<Record<string, LotSnapshot>>(() =>
-    Object.fromEntries(initialSnapshots.map((snapshot) => [snapshot.card.cardId, snapshot])),
-  );
-  const [settled, setSettled] = useState<string[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [limit, setLimit] = useState(PAGE_SIZE);
-  const [frenchOnly] = useFrenchOnly();
-  const [view, setView] = useView();
-
-  const staleKey = initialStaleIds.join("|");
-  const fetching = initialStaleIds.filter((id) => !settled.includes(id)).length > 0;
-
-  useEffect(() => {
-    const ids = staleKey ? staleKey.split("|") : [];
-    if (ids.length === 0) return;
-
-    const controller = new AbortController();
-    let failures = 0;
-
-    void Promise.all(
-      ids.map(async (cardId) => {
-        try {
-          const res = await fetch(`/api/lots?cardId=${encodeURIComponent(cardId)}`, {
-            signal: controller.signal,
-          });
-          const data = (await res.json()) as LotSnapshot & { error?: string };
-          if (controller.signal.aborted) return;
-          if (!res.ok) throw new Error(data.error ?? "Recherche de lots impossible.");
-          setSnapshots((current) => ({ ...current, [cardId]: data }));
-        } catch (err) {
-          if (controller.signal.aborted || (err as Error).name === "AbortError") return;
-          failures += 1;
-          setError(err instanceof Error ? err.message : "Recherche de lots impossible.");
-        } finally {
-          if (!controller.signal.aborted) setSettled((current) => [...current, cardId]);
-        }
-      }),
-    ).then(() => {
-      // Une carte en échec sur dix n'est qu'un détail ; tout échouer est un
-      // vrai problème, et c'est le seul cas qui mérite de rester affiché.
-      if (!controller.signal.aborted && failures < ids.length) setError(null);
-    });
-
-    return () => controller.abort();
-  }, [staleKey]);
-
-  const cards = useMemo(() => {
-    const byId: Record<string, FeedCard> = {};
-    for (const snapshot of Object.values(snapshots)) byId[snapshot.card.cardId] = snapshot.card;
-    return byId;
-  }, [snapshots]);
-
-  const partial = useMemo(() => {
-    const messages = new Set<string>();
-    for (const snapshot of Object.values(snapshots)) {
-      if (snapshot.partial) messages.add(snapshot.partial);
-    }
-    return [...messages];
-  }, [snapshots]);
-
-  const items = useMemo(() => {
-    const followed = new Set(favorites.map((favorite) => favorite.cardId));
-
-    // Un gros lot remonte sur plusieurs cartes de la collection à la fois —
-    // c'est même sa raison d'être. On ne le montre qu'une fois, rattaché à la
-    // carte pour laquelle il a obtenu la meilleure note.
-    const best = new Map<string, LotItem>();
-    for (const snapshot of Object.values(snapshots)) {
-      if (!followed.has(snapshot.card.cardId)) continue;
-      for (const item of snapshot.items) {
-        const known = best.get(item.id);
-        if (!known || item.score > known.score) best.set(item.id, item);
-      }
-    }
-    return [...best.values()];
-  }, [snapshots, favorites]);
-
-  const { rows, hiddenByLanguage, hiddenBySize } = useFiltered(items, {
-    frenchOnly,
-    sized,
-    sort,
-  });
-
-  const visible = rows.slice(0, limit);
-
-  return (
-    <>
-      <p className="text-[11px] leading-relaxed text-faint">
-        Les lots dont le titre cite une de vos cartes ou son extension — cherchés à part du fil,
-        avec leurs propres requêtes («&nbsp;lot Dracaufeu&nbsp;», «&nbsp;lot cartes Set de
-        Base&nbsp;»), parce qu’un gros lot ne cite jamais le numéro d’une carte. Leur prix n’est pas
-        comparé à la cote&nbsp;: un lot ne contient pas deux cents fois la même carte, et l’écart
-        affiché serait faux.
-      </p>
-
-      <Controls
-        sort={sort}
-        onSort={(value) => {
-          onSort(value);
-          setLimit(PAGE_SIZE);
-        }}
-        sized={sized}
-        onSized={(value) => {
-          onSized(value);
-          setLimit(PAGE_SIZE);
-        }}
-        count={rows.length}
-        view={view}
-        onView={setView}
-      />
-
-      {error && <ErrorNote>{error}</ErrorNote>}
-      {partial.length > 0 && (
-        <p className="text-[11px] text-faint">Flux incomplet — {partial.join(" · ")}</p>
-      )}
-
-      <Notices
-        frenchOnly={frenchOnly}
-        hiddenByLanguage={hiddenByLanguage}
-        sized={sized}
-        hiddenBySize={hiddenBySize}
-      />
-
-      {fetching && rows.length === 0 && <Skeletons view={view} />}
-
-      {rows.length > 0 && (
-        <Rows
-          items={visible}
-          total={rows.length}
-          cards={cards}
-          now={serverNow}
-          view={view}
-          onMore={() => setLimit((current) => current + PAGE_SIZE)}
-        />
-      )}
-
-      {rows.length === 0 && !fetching && (
-        <p className="panel px-4 py-8 text-center text-sm text-dim">
-          Aucun lot ne cite vos cartes ni leurs extensions en ce moment.
         </p>
       )}
     </>
@@ -495,32 +294,6 @@ function useFiltered(
 
 /* ---------------------------------------------------------------- annexes */
 
-function TabButton({
-  active,
-  onClick,
-  hint,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  hint: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      title={hint}
-      className={`rounded-md px-2.5 py-1 text-[13px] leading-none transition ${
-        active ? "bg-accent/15 font-medium text-accent" : "text-faint hover:text-text"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
-
 function Controls({
   sort,
   onSort,
@@ -529,6 +302,9 @@ function Controls({
   count,
   view,
   onView,
+  onRefresh,
+  loading,
+  cooldown,
 }: {
   sort: LotSort;
   onSort: (value: LotSort) => void;
@@ -537,6 +313,9 @@ function Controls({
   count: number;
   view: View;
   onView: (value: View) => void;
+  onRefresh: () => void;
+  loading: boolean;
+  cooldown: number;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -569,6 +348,8 @@ function Controls({
       </button>
 
       <ViewSwitch value={view} onChange={onView} label="Affichage des lots" />
+
+      <RefreshButton onClick={onRefresh} loading={loading} cooldown={cooldown} />
     </div>
   );
 }
@@ -625,14 +406,12 @@ function Skeletons({ view }: { view: View }) {
 function Rows({
   items,
   total,
-  cards,
   now,
   view,
   onMore,
 }: {
   items: LotItem[];
   total: number;
-  cards: Record<string, FeedCard>;
   now: number;
   view: View;
   onMore: () => void;
@@ -643,12 +422,7 @@ function Rows({
     <>
       <ul className={LAYOUT[view].list}>
         {items.map((item) => (
-          <Lot
-            key={item.id}
-            item={item}
-            card={item.cardId ? cards[item.cardId] : undefined}
-            now={now}
-          />
+          <Lot key={item.id} item={item} now={now} />
         ))}
       </ul>
 
@@ -661,7 +435,7 @@ function Rows({
   );
 }
 
-function LotRow({ item, card, now }: { item: LotItem; card: FeedCard | undefined; now: number }) {
+function LotRow({ item, now }: { item: LotItem; now: number }) {
   const posted = age(item.createdAt, now);
   const remaining = item.auction ? countdown(item.endsAt, now) : null;
   const total = item.totalPrice ?? item.price;
@@ -689,16 +463,6 @@ function LotRow({ item, card, now }: { item: LotItem; card: FeedCard | undefined
 
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            {card && (
-              <Link
-                href={`/carte/${encodeURIComponent(card.cardId)}`}
-                className="text-[11px] font-semibold text-accent transition hover:underline"
-                title="Carte de votre collection à laquelle ce lot a été rattaché"
-              >
-                {card.name}
-                {card.localId && <span className="font-normal opacity-70"> n°{card.localId}</span>}
-              </Link>
-            )}
             <SourceChip source={item.source} />
             {item.quantity !== null && (
               <span className="chip" title="Quantité annoncée par le titre">

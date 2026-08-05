@@ -3,7 +3,10 @@
 import Link from "next/link";
 import { CONDITION_LABELS } from "@/lib/match";
 import { age, countdown, euro, percent, plural } from "@/lib/format";
-import { SOURCE_NAMES, type FeedCard, type FeedItem, type Source } from "@/lib/feed";
+import type { FeedCard, FeedItem } from "@/lib/feed";
+// Depuis `lib/source` et non `lib/feed` : c'est une valeur, donc un import qui
+// survit à la compilation et entraîne tout le module dans le paquet client.
+import { SOURCE_NAMES, type Source } from "@/lib/source";
 
 /**
  * Une annonce du fil, en ligne.

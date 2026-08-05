@@ -28,8 +28,10 @@ const MODES = [
   },
   {
     href: "/lots",
-    label: "Mes lots",
-    hint: "Les lots Pokémon : les derniers mis en ligne, et ceux qui citent vos cartes",
+    // « Lots » et non « Mes lots » : la page ne part d'aucune collection, et
+    // c'est tout son intérêt. L'asymétrie avec « Mes cartes » est le message.
+    label: "Lots",
+    hint: "Tous les lots Pokémon récemment mis en ligne, sans rapport avec votre collection",
   },
 ];
 

@@ -1,86 +1,54 @@
 /**
- * Instantanés des lots, un fichier par carte suivie.
+ * L'instantané des lots Pokémon, partagé par tout le site.
+ *
+ * Un seul fichier, et non plus un par carte suivie : les requêtes ne dépendent
+ * d'aucune collection. Douze recherches par quart d'heure pour l'ensemble des
+ * visiteurs, quel que soit le nombre de comptes et de cartes épinglées.
  *
  * Module distinct de `feed.ts` plutôt qu'un champ de plus dans son instantané,
- * pour trois raisons qui tiennent toutes à la nature d'un lot :
+ * pour deux raisons qui tiennent à la nature d'un lot :
  *
  * 1. **La requête n'est pas la même.** Le fil cherche « Dracaufeu 4/102 » ; un
- *    lot s'annonce « lot de 200 cartes Pokémon ». Voir `lotQueries`.
- * 2. **La notation est inversée.** `scoreItem` retire deux points au mot
- *    « lot » ; ici il est éliminatoire dans l'autre sens. Voir `scoreLot`.
- * 3. **Le rythme n'est pas le même.** Un lot reste en ligne des semaines, là où
- *    une carte à l'unité part en heures — le collecter aussi souvent que le fil
- *    doublerait les appels aux catalogues pour rien.
+ *    lot s'annonce « lot de 200 cartes Pokémon ». Aucun mot en commun.
+ * 2. **La notation ne s'applique pas.** Sans carte de référence, il n'y a rien
+ *    à comparer : on tranche sur le titre nu, avec `isPokemonLot`.
  *
- * Fusionner les deux aurait donc imposé de porter partout la distinction
- * « c'est un lot / c'en est pas un », et surtout de rejouer la collecte des
- * lots à chaque expiration du fil.
+ * Une collecte par carte a existé ici, qui cherchait « lot Dracaufeu » et
+ * « lot cartes Set de Base » pour chaque carte épinglée. Elle a été retirée :
+ * le fil de la page d'accueil répond déjà à cette question — un lot qui nomme
+ * une carte suivie y remonte par la notation ordinaire, et le bouton « Sans
+ * lots » sert à les masquer. Deux chemins pour une même question, dont l'un
+ * coûtait quatre recherches **par carte suivie** et émettait autant de fois la
+ * même requête d'extension qu'il y avait de cartes dans cette extension.
+ *
+ * `scoreLot`, `scoreLots`, `LOT_SCORE` et `lotQueries` restent dans `match.ts`,
+ * sans appelant : ils servaient cette collecte, et resserviront à un filtre
+ * « ne montrer que les lots contenant telle carte » posé sur la liste unique.
  */
 
 import path from "node:path";
 import { isConfigured as hasEbay, searchEbay } from "./ebay";
-import { DATA_DIR, readJson, safeFileName, serialize, writeJson } from "./json-file";
+import { DATA_DIR, readJson, serialize, writeJson } from "./json-file";
 import { isConfigured as hasLbc, searchLbcRecents } from "./lbc";
-import {
-  condition,
-  isPokemonLot,
-  lotQueries,
-  lotSize,
-  scoreLots,
-  LOT_SCORE,
-  type Condition,
-} from "./match";
-import { SOURCE_NAMES, type FeedCard, type Source } from "./feed";
-import type { FavoriteCard } from "./store";
-import { getCard, type CardDetail } from "./tcgdex";
+import { condition, isPokemonLot, lotSize, type Condition } from "./match";
+import { SOURCE_NAMES, type Source } from "./source";
 import { searchVinted } from "./vinted";
 
 const DIR = path.join(DATA_DIR, "lots");
 
 /**
- * Durée de validité : dix-huit fois celle du fil.
+ * Lot tel que la page l'affiche.
  *
- * Un lot à 300 cartes n'est pas une bonne affaire qui s'évapore en dix minutes.
- * Il reste en ligne des semaines, souvent jusqu'à négociation — le rafraîchir
- * au rythme du fil coûterait des appels aux catalogues sans rien montrer de
- * neuf. Le rythme doit suivre celui des *mises en ligne*, pas celui des
- * disparitions.
- *
- * Trente minutes, valeur précédente, était calquée sur le fil par symétrie
- * plutôt que sur ce que la collecte rapporte réellement. Trois heures s'aligne
- * sur ce qui a été mesuré côté leboncoin : une requête *générique* produit une
- * trentaine de mises en ligne par heure, et une requête de lot par carte —
- * « lot Dracaufeu », bien plus étroite — en produit quelques-unes par jour. À
- * trente minutes, la quasi-totalité des collectes réécrivait le même
- * instantané.
- *
- * Aucun effet sur une carte qu'on vient d'ajouter : sans instantané, elle est
- * périmée d'emblée et collectée au premier affichage.
- */
-export const LOTS_FRESH_MS = 3 * 60 * 60 * 1000;
-
-/** Lots conservés par carte. La queue de liste ne cite déjà plus la carte. */
-const MAX_PER_CARD = 20;
-
-/**
- * Lot tel que la section l'affiche.
- *
- * Trois champs de `FeedItem` manquent, et leur absence est le sujet même de ce
+ * Deux champs de `FeedItem` manquent, et leur absence est le sujet même de ce
  * module : `trend` et `vsMarket` compareraient le prix d'un lot entier à la
  * cote d'une carte unique — un lot de 200 cartes à 60 € afficherait « −85 % »
  * et raflerait le classement sans rien vouloir dire. `firstSeen` manque parce
- * qu'on n'archive pas les lots ; voir `refreshLots`.
+ * qu'on n'archive pas les lots ; voir `refreshRecentLots`.
  */
 export interface LotItem {
-  /** Préfixé par la source, comme dans le fil : `vinted:123`, `ebay:v1|456|0`. */
+  /** Préfixé par la source : `vinted:123`, `ebay:v1|456|0`, `lbc:3208812061`. */
   id: string;
   source: Source;
-  /**
-   * Carte de la collection à laquelle le lot a été rattaché, `null` dans le
-   * flux des lots récents — qui ne part d'aucune carte, et dont c'est tout
-   * l'intérêt : on ne sait pas encore ce qu'il y a dedans.
-   */
-  cardId: string | null;
   title: string;
   url: string;
   thumbnail: string | null;
@@ -90,8 +58,7 @@ export interface LotItem {
   promoted: boolean;
   favourites: number;
   createdAt: number | null;
-  score: number;
-  /** Pays de l'objet quand la source le déclare — eBay le fait, Vinted non. */
+  /** Pays de l'objet quand la source le déclare — eBay et leboncoin le font, Vinted non. */
   country: string | null;
   auction: boolean;
   bids: number;
@@ -105,55 +72,6 @@ export interface LotItem {
   perCard: number | null;
 }
 
-export interface LotSnapshot {
-  card: FeedCard;
-  /** Date de la collecte, en ms epoch. */
-  at: number;
-  /** Requêtes employées, dans l'ordre. Affichées nulle part, utiles au débogage. */
-  queries: string[];
-  items: LotItem[];
-  /** Renseigné quand *toutes* les places de marché ont échoué. */
-  error?: string;
-  /** Renseigné quand une seule a échoué : l'instantané est valide mais incomplet. */
-  partial?: string;
-}
-
-function file(cardId: string): string {
-  return path.join(DIR, `${safeFileName(cardId)}.json`);
-}
-
-export function isFresh(
-  snapshot: LotSnapshot | null,
-  now = Date.now(),
-  maxAge = LOTS_FRESH_MS,
-): boolean {
-  return snapshot !== null && !snapshot.error && now - snapshot.at < maxAge;
-}
-
-export async function readLotSnapshot(cardId: string): Promise<LotSnapshot | null> {
-  const snapshot = await readJson<LotSnapshot>(file(cardId));
-  if (!snapshot?.items || !Array.isArray(snapshot.items)) return null;
-  return snapshot;
-}
-
-/** Instantanés disponibles, dans l'ordre de la collection. Aucune requête réseau. */
-export async function readLotSnapshots(favorites: FavoriteCard[]): Promise<LotSnapshot[]> {
-  const found = await Promise.all(favorites.map((favorite) => readLotSnapshot(favorite.cardId)));
-  return found.filter((snapshot): snapshot is LotSnapshot => snapshot !== null);
-}
-
-/** Cartes dont l'instantané de lots manque ou a expiré. */
-export function staleLotCardIds(
-  favorites: FavoriteCard[],
-  snapshots: LotSnapshot[],
-  now = Date.now(),
-): string[] {
-  const byId = new Map(snapshots.map((snapshot) => [snapshot.card.cardId, snapshot]));
-  return favorites
-    .filter((favorite) => !isFresh(byId.get(favorite.cardId) ?? null, now))
-    .map((favorite) => favorite.cardId);
-}
-
 /* ---------------------------------------------------------------- collecte */
 
 /** Prix par carte, arrondi au centime. */
@@ -163,9 +81,9 @@ function perCard(price: number | null, quantity: number | null): number | null {
 }
 
 /**
- * Champs communs aux deux places de marché. Déclaré structurellement plutôt
- * qu'en union de `VintedItem | EbayItem` : le flux des lots récents construit
- * des `LotItem` sans passer par la notation, donc sans `Scored<>`.
+ * Champs communs aux trois places de marché. Déclaré structurellement plutôt
+ * qu'en union de `VintedItem | EbayItem | LbcItem` : les trois n'ont en partage
+ * que ce qu'un lot affiche, et l'union obligerait à discriminer partout.
  */
 type MarketItem = {
   id: string | number;
@@ -180,16 +98,9 @@ type MarketItem = {
   createdAt: number | null;
 };
 
-/**
- * La note est passée à part plutôt que lue dans `item.match` : elle vient de
- * `scoreLot` pour les lots d'une carte, et n'existe pas pour le flux récent,
- * qui n'a aucune carte à laquelle se comparer.
- */
 function toLot(
   item: MarketItem,
-  cardId: string | null,
   source: Source,
-  score: number,
   extra: Pick<LotItem, "country" | "auction" | "bids" | "endsAt">,
 ): LotItem {
   const quantity = lotSize(item.title);
@@ -198,7 +109,6 @@ function toLot(
   return {
     id: `${source}:${item.id}`,
     source,
-    cardId,
     title: item.title,
     url: item.url,
     thumbnail: item.thumbnail,
@@ -208,7 +118,6 @@ function toLot(
     promoted: item.promoted,
     favourites: item.favourites,
     createdAt: item.createdAt,
-    score,
     quantity,
     // Une enchère en cours n'a pas de prix demandé : son prix par carte
     // baisserait mécaniquement le classement de tous les lots à prix fixe,
@@ -218,184 +127,20 @@ function toLot(
   };
 }
 
-/**
- * Places de marché interrogeables à la demande.
- *
- * Leboncoin en est exclu, et le type le dit plutôt qu'un commentaire : sa
- * collecte tourne sur minuterie dans un processus séparé — voir `lib/lbc.ts` —
- * et ne sait donc rien des requêtes d'une carte particulière. Il n'alimente
- * que le flux des lots récents, qui ne part d'aucune carte.
- */
-type QueryableSource = Exclude<Source, "lbc">;
-
-/**
- * Interroge une place de marché sur toutes les requêtes de lot d'une carte.
- *
- * Rend toujours une liste, même vide : l'erreur est retournée plutôt que
- * propagée, pour qu'une place de marché en panne n'emporte pas l'autre.
- */
-async function collect(
-  source: QueryableSource,
-  card: CardDetail,
-  queries: string[],
-): Promise<{ items: LotItem[]; error: string | null }> {
-  try {
-    if (source === "vinted") {
-      // Pertinence seule, là où le fil croise deux tris : le tri par nouveauté
-      // sert au badge « nouveau », que les lots ne portent pas.
-      const pages = await Promise.all(
-        queries.map((query) => searchVinted({ query, order: "relevance", perPage: 48 })),
-      );
-      const scored = scoreLots(
-        pages.flatMap((page) => page.items),
-        card,
-      );
-      return {
-        items: scored.map((item) =>
-          toLot(item, card.id, "vinted", item.match.score, {
-            country: null,
-            auction: false,
-            bids: 0,
-            endsAt: null,
-          }),
-        ),
-        error: null,
-      };
-    }
-
-    const pages = await Promise.all(
-      queries.map((query) => searchEbay({ query, order: "best_match", perPage: 50 })),
-    );
-    const scored = scoreLots(
-      pages.flatMap((page) => page.items),
-      card,
-    );
-    return {
-      items: scored.map((item) =>
-        toLot(item, card.id, "ebay", item.match.score, {
-          country: item.country,
-          auction: item.auction,
-          bids: item.bids,
-          endsAt: item.endsAt,
-        }),
-      ),
-      error: null,
-    };
-  } catch (error) {
-    const label = SOURCE_NAMES[source];
-    const message = error instanceof Error ? error.message : `Recherche ${label} impossible.`;
-    return { items: [], error: `${label} : ${message}` };
-  }
-}
-
-/**
- * Relance la collecte des lots pour une carte et réécrit son instantané.
- *
- * Aucun relevé n'est consigné, à la différence du fil. `recordSightings`
- * alimente la distribution des prix observés pour la carte, et
- * `summarize` n'écarte que les correspondances faibles : un lot de 300 cartes
- * à 200 € y entrerait comme une observation valide et emporterait la médiane.
- * Le prix d'un lot ne dit rien du prix de la carte, donc il n'est pas archivé —
- * et les lots ne portent, en conséquence, pas de pastille « nouveau ».
- */
-export async function refreshLots(favorite: FavoriteCard, now = Date.now()): Promise<LotSnapshot> {
-  return serialize(`lots:${favorite.cardId}`, async () => {
-    const existing = await readLotSnapshot(favorite.cardId);
-    if (isFresh(existing, now)) return existing as LotSnapshot;
-
-    const card = await getCard(favorite.cardId);
-    if (!card) {
-      const failed: LotSnapshot = {
-        card: fallbackCard(favorite),
-        at: now,
-        queries: [],
-        items: existing?.items ?? [],
-        error: "Carte introuvable dans la base TCGdex.",
-      };
-      await writeJson(file(favorite.cardId), failed);
-      return failed;
-    }
-
-    const feedCard: FeedCard = {
-      cardId: card.id,
-      name: card.name,
-      localId: card.localId ?? null,
-      setName: card.set?.name ?? favorite.setName ?? null,
-      image: card.image ?? favorite.image ?? null,
-      trend: card.pricing?.cardmarket?.trend ?? card.pricing?.cardmarket?.avg30 ?? null,
-    };
-
-    const queries = lotQueries(card);
-    const sources: QueryableSource[] = hasEbay() ? ["vinted", "ebay"] : ["vinted"];
-    const collected = await Promise.all(
-      sources.map((source) => collect(source, card, queries)),
-    );
-
-    const errors = collected.map((result) => result.error).filter((msg) => msg !== null);
-
-    if (errors.length === sources.length) {
-      const failed: LotSnapshot = {
-        card: feedCard,
-        at: now,
-        queries,
-        items: existing?.items ?? [],
-        error: errors.join(" · "),
-      };
-      await writeJson(file(card.id), failed);
-      return failed;
-    }
-
-    // Les deux requêtes d'une même source se recouvrent largement — « lot
-    // Dracaufeu » et « lot cartes Base Set » ramènent les mêmes gros lots. On
-    // garde la meilleure note de chaque annonce.
-    const best = new Map<string, LotItem>();
-    for (const item of collected.flatMap((result) => result.items)) {
-      const known = best.get(item.id);
-      if (!known || item.score > known.score) best.set(item.id, item);
-    }
-
-    const kept = [...best.values()]
-      .filter((item) => item.score >= LOT_SCORE)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, MAX_PER_CARD);
-
-    const snapshot: LotSnapshot = {
-      card: feedCard,
-      at: now,
-      queries,
-      items: kept,
-      ...(errors.length > 0 ? { partial: errors.join(" · ") } : {}),
-    };
-    await writeJson(file(card.id), snapshot);
-    return snapshot;
-  });
-}
-
-function fallbackCard(favorite: FavoriteCard): FeedCard {
-  return {
-    cardId: favorite.cardId,
-    name: favorite.name,
-    localId: favorite.localId,
-    setName: favorite.setName,
-    image: favorite.image,
-    trend: null,
-  };
-}
-
 /* ------------------------------------------------------------ lots récents */
 
 /**
- * Le flux des lots qui viennent d'être mis en ligne.
+ * Les requêtes, volontairement larges.
  *
- * C'est l'inverse exact de tout ce qui précède : on ne part d'aucune carte. Un
- * gros lot ne dit pas ce qu'il contient, et c'est justement là que se font les
- * affaires — le vendeur qui liquide un classeur au poids ne sait pas toujours
- * ce qu'il y a dedans. La seule chose qui compte est donc d'arriver tôt, d'où
- * un tri par nouveauté et non par pertinence.
+ * Le tri par nouveauté est ici le bon, contrairement au fil des cartes : la
+ * requête n'est pas floue faute de mieux, elle est *délibérément* générique. Il
+ * n'y a pas de bonne réponse à faire remonter en pertinence — juste des
+ * annonces récentes à voir avant les autres.
  *
- * Un instantané unique, partagé par tous : les requêtes ne dépendent d'aucune
- * collection. Huit recherches tous les quarts d'heure pour tout le site, là où
- * les lots par carte en coûtent quatre par carte suivie.
+ * Le collecteur leboncoin a sa propre liste, dans `collect/lbc.py`, à une
+ * exception près : « lot pokemon » y est écarté. Sans le mot « cartes »,
+ * leboncoin rend surtout des peluches et des jouets, là où le catalogue de
+ * Vinted — déjà celui d'une brocante de mode — restait exploitable.
  */
 export const RECENT_QUERIES = [
   "lot cartes pokemon",
@@ -405,14 +150,20 @@ export const RECENT_QUERIES = [
 ];
 
 /**
- * Un quart d'heure. Plus court que les lots par carte : ici la fraîcheur *est*
- * le produit, et un flux « des plus récents » vieux d'une demi-heure ne vaut
- * pas grand-chose.
+ * Un quart d'heure. La fraîcheur *est* le produit ici : un flux « des derniers
+ * mis en ligne » vieux d'une demi-heure ne vaut pas grand-chose. C'est aussi ce
+ * que la page promet — on recharge, les derniers arrivent.
  */
 export const RECENTS_FRESH_MS = 15 * 60 * 1000;
 
-/** Annonces conservées. Au-delà, personne ne fait défiler. */
-const MAX_RECENTS = 120;
+/**
+ * Lots conservés. Au-delà, personne ne fait défiler.
+ *
+ * Relevé à 120 du temps de deux places de marché ; leboncoin en apporte une
+ * cinquantaine de plus par passage, et le plafond tronquait alors la fin de la
+ * liste au lieu de la borner.
+ */
+const MAX_RECENTS = 200;
 
 export interface RecentLots {
   /** Date de la collecte, en ms epoch. */
@@ -425,7 +176,7 @@ export interface RecentLots {
   partial?: string;
 }
 
-/** Le préfixe écarte toute collision avec un identifiant de carte. */
+/** Le préfixe écarte toute collision avec les anciens fichiers par carte. */
 const RECENTS_FILE = path.join(DIR, "_recents.json");
 
 export function recentsAreFresh(
@@ -444,52 +195,47 @@ export async function readRecentLots(): Promise<RecentLots | null> {
 
 /** Tout ce que la page `/lots` doit lire, y compris son horloge. */
 export interface LotsView {
-  snapshots: LotSnapshot[];
-  /** Cartes dont l'instantané manque ou a expiré, à rattraper côté client. */
-  staleIds: string[];
   recent: RecentLots | null;
   recentIsStale: boolean;
   /**
    * Horloge du serveur, renvoyée plutôt que relue par l'appelant — pour la même
    * raison que `FeedVisit.now` : une page qui appelle `Date.now()` pendant son
    * rendu n'est plus pure, et son rendu cesserait de coïncider avec celui du
-   * client sur les « il y a 3 min ». Une seule lecture sert donc aux deux
-   * fraîcheurs *et* au premier rendu, qui ne peuvent ainsi pas diverger.
+   * client sur les « il y a 3 min ». Une seule lecture sert donc à la fraîcheur
+   * *et* au premier rendu, qui ne peuvent ainsi pas diverger.
    */
   now: number;
 }
 
-/** Les deux onglets d'un coup, depuis le disque seul : aucune requête réseau. */
-export async function readLotsView(favorites: FavoriteCard[]): Promise<LotsView> {
+/** Depuis le disque seul : aucune requête réseau. */
+export async function readLotsView(): Promise<LotsView> {
   const now = Date.now();
+  const recent = await readRecentLots();
 
-  const [snapshots, recent] = await Promise.all([readLotSnapshots(favorites), readRecentLots()]);
-
-  return {
-    snapshots,
-    staleIds: staleLotCardIds(favorites, snapshots, now),
-    recent,
-    recentIsStale: !recentsAreFresh(recent, now),
-    now,
-  };
+  return { recent, recentIsStale: !recentsAreFresh(recent, now), now };
 }
 
 /**
  * Interroge une place de marché sur toutes les requêtes génériques.
  *
- * Le tri par nouveauté est ici le bon, contrairement au fil des cartes : la
- * requête n'est pas floue faute de mieux, elle est *volontairement* large. Il
- * n'y a pas de bonne réponse à faire remonter en pertinence — juste des
- * annonces récentes à voir avant les autres.
+ * Rend toujours une liste, même vide : l'erreur est retournée plutôt que
+ * propagée, pour qu'une place de marché en panne n'emporte pas les autres.
  */
 async function collectRecent(
   source: Source,
+  /**
+   * Ignorer le cache de réponses des places de marché. Sans lui, « Actualiser »
+   * ne servait à rien pendant quatre-vingt-dix secondes : la collecte repartait,
+   * mais les mêmes réponses en ressortaient. Leboncoin n'est pas concerné — il
+   * n'interroge rien, il relit un fichier.
+   */
+  live = false,
 ): Promise<{ items: LotItem[]; error: string | null }> {
   try {
     if (source === "vinted") {
       const pages = await Promise.all(
         RECENT_QUERIES.map((query) =>
-          searchVinted({ query, order: "newest_first", perPage: 48 }),
+          searchVinted({ query, order: "newest_first", perPage: 48, fresh: live }),
         ),
       );
       return {
@@ -497,12 +243,7 @@ async function collectRecent(
           .flatMap((page) => page.items)
           .filter((item) => isPokemonLot(item.title))
           .map((item) =>
-            toLot(item, null, "vinted", 0, {
-              country: null,
-              auction: false,
-              bids: 0,
-              endsAt: null,
-            }),
+            toLot(item, "vinted", { country: null, auction: false, bids: 0, endsAt: null }),
           ),
         error: null,
       };
@@ -521,7 +262,7 @@ async function collectRecent(
         items: items
           .filter((item) => isPokemonLot(item.title))
           .map((item) =>
-            toLot(item, null, "lbc", 0, {
+            toLot(item, "lbc", {
               // Seule source dont la provenance est connue sans lire le titre :
               // leboncoin est franco-français. Le filtre « français uniquement »
               // s'y fie directement, sans retomber sur la langue du titre.
@@ -537,14 +278,16 @@ async function collectRecent(
     }
 
     const pages = await Promise.all(
-      RECENT_QUERIES.map((query) => searchEbay({ query, order: "newly_listed", perPage: 50 })),
+      RECENT_QUERIES.map((query) =>
+        searchEbay({ query, order: "newly_listed", perPage: 50, fresh: live }),
+      ),
     );
     return {
       items: pages
         .flatMap((page) => page.items)
         .filter((item) => isPokemonLot(item.title))
         .map((item) =>
-          toLot(item, null, "ebay", 0, {
+          toLot(item, "ebay", {
             country: item.country,
             auction: item.auction,
             bids: item.bids,
@@ -560,11 +303,24 @@ async function collectRecent(
   }
 }
 
-/** Relance la collecte du flux récent et réécrit l'instantané partagé. */
-export async function refreshRecentLots(now = Date.now()): Promise<RecentLots> {
+/**
+ * Relance la collecte et réécrit l'instantané partagé.
+ *
+ * Aucun relevé n'est consigné, à la différence du fil. `recordSightings`
+ * alimente la distribution des prix observés d'une carte, et le prix d'un lot
+ * ne dit rien du prix d'une carte : un lot de 300 cartes à 200 € y entrerait
+ * comme une observation valide et emporterait la médiane. Les lots ne portent
+ * donc, en conséquence, pas de pastille « nouveau ».
+ */
+/**
+ * @param force Passer outre la validité d'un quart d'heure, pour le bouton
+ *              « Actualiser ». Le délai entre deux forçages est tenu par la
+ *              route : elle seule sait qui demande.
+ */
+export async function refreshRecentLots(now = Date.now(), force = false): Promise<RecentLots> {
   return serialize("lots:recents", async () => {
     const existing = await readRecentLots();
-    if (recentsAreFresh(existing, now)) return existing as RecentLots;
+    if (!force && recentsAreFresh(existing, now)) return existing as RecentLots;
 
     // Leboncoin ne rejoint la liste que si un instantané exploitable existe :
     // un projet qui n'a jamais lancé `collect/lbc.py` doit voir une source de
@@ -573,7 +329,7 @@ export async function refreshRecentLots(now = Date.now()): Promise<RecentLots> {
     if (hasEbay()) sources.push("ebay");
     if (await hasLbc(now)) sources.push("lbc");
 
-    const collected = await Promise.all(sources.map((source) => collectRecent(source)));
+    const collected = await Promise.all(sources.map((source) => collectRecent(source, force)));
     const errors = collected.map((result) => result.error).filter((msg) => msg !== null);
 
     if (errors.length === sources.length) {
@@ -587,18 +343,18 @@ export async function refreshRecentLots(now = Date.now()): Promise<RecentLots> {
       return failed;
     }
 
-    // Les quatre requêtes se recouvrent largement — « lot pokemon » ramène une
-    // bonne part de ce que ramène « lot cartes pokemon ». Toutes les notes
-    // valant zéro ici, on garde simplement la première occurrence.
+    // Les requêtes se recouvrent largement — « lot pokemon » ramène une bonne
+    // part de ce que ramène « lot cartes pokemon ». On garde la première
+    // occurrence : elles sont identiques, seule l'origine diffère.
     const best = new Map<string, LotItem>();
     for (const item of collected.flatMap((result) => result.items)) {
       if (!best.has(item.id)) best.set(item.id, item);
     }
 
-    // Tri par mise en ligne, la raison d'être du flux. Les deux places de
-    // marché ne datent pas leurs annonces pareil — eBay publie une vraie date,
-    // Vinted l'horodatage de la photo — et les mélanger reste le meilleur
-    // classement disponible. Sans date, en queue plutôt qu'en tête.
+    // Tri par mise en ligne, la raison d'être de la page. Les trois places de
+    // marché ne datent pas leurs annonces pareil — eBay et leboncoin publient
+    // une vraie date, Vinted l'horodatage de la photo — et les mélanger reste
+    // le meilleur classement disponible. Sans date, en queue plutôt qu'en tête.
     const kept = [...best.values()]
       .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
       .slice(0, MAX_RECENTS);
