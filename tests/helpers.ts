@@ -17,6 +17,32 @@ export const DRACAUFEU: CardDetail = {
   pricing: { cardmarket: { trend: 100 } },
 };
 
+/**
+ * Dracaufeu Gold Star, `ex15-100`. Le nom officiel publié par TCGdex porte deux
+ * symboles — l'étoile blanche (U+2606) et le delta (U+03B4) — qu'aucune annonce
+ * n'emploie : les vendeurs écrivent « Dracaufeu Gold star 100/101 ».
+ */
+export const DRACAUFEU_STAR: CardDetail = {
+  id: "ex15-100",
+  localId: "100",
+  name: "Dracaufeu ☆ δ",
+  rarity: "Rare",
+  set: {
+    id: "ex15",
+    name: "EX Île des Dragons",
+    cardCount: { official: 101, total: 101 },
+  },
+  pricing: { cardmarket: { trend: 900 } },
+};
+
+/** Carte à delta seul, sans étoile : le symbole est retiré, pas traduit. */
+export const EOKO_DELTA: CardDetail = {
+  id: "pop4-1",
+  localId: "1",
+  name: "Eoko δ",
+  set: { id: "pop4", name: "POP Série 4", cardCount: { official: 17, total: 17 } },
+};
+
 /** Carte sans numéro total ni cote, pour les chemins dégradés. */
 export const SANS_COTE: CardDetail = {
   id: "xy1-7",

@@ -3,6 +3,7 @@ import Dashboard from "@/components/Dashboard";
 import FocusSearchButton from "@/components/FocusSearchButton";
 import { getCurrentUser } from "@/lib/auth";
 import { readSnapshots, staleCardIds } from "@/lib/feed";
+import { readLotSnapshots, readRecentLots, recentsAreFresh, staleLotCardIds } from "@/lib/lots";
 import { touchFeedVisit } from "@/lib/store";
 
 export default async function Home() {
@@ -13,9 +14,15 @@ export default async function Home() {
 
   // Les instantanés viennent du disque : aucune requête Vinted n'est faite ici,
   // et la page part complète. `Dashboard` ne rattrape que les cartes périmées.
-  const [visit, snapshots] = await Promise.all([
+  //
+  // Les lots sont lus au même endroit, mais leur rattrapage n'est pas
+  // automatique : la section les cherche seulement une fois dépliée. Ce qui est
+  // déjà sur le disque s'affiche donc tout de suite, sans rien coûter.
+  const [visit, snapshots, lots, recentLots] = await Promise.all([
     touchFeedVisit(user.id),
     readSnapshots(user.favorites),
+    readLotSnapshots(user.favorites),
+    readRecentLots(),
   ]);
 
   return (
@@ -23,6 +30,10 @@ export default async function Home() {
       favorites={user.favorites}
       initialSnapshots={snapshots}
       initialStaleIds={staleCardIds(user.favorites, snapshots, visit.now)}
+      initialLotSnapshots={lots}
+      initialStaleLotIds={staleLotCardIds(user.favorites, lots, visit.now)}
+      initialRecentLots={recentLots}
+      recentLotsStale={!recentsAreFresh(recentLots, visit.now)}
       newSince={visit.newSince}
       serverNow={visit.now}
     />

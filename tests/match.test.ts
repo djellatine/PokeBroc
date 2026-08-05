@@ -13,10 +13,11 @@ import {
   condition,
   normalize,
   scoreItem,
+  searchName,
   suggestedQueries,
 } from "../lib/match.ts";
 import type { CardDetail } from "../lib/tcgdex.ts";
-import { DRACAUFEU, SANS_COTE, makeItem } from "./helpers.ts";
+import { DRACAUFEU, DRACAUFEU_STAR, EOKO_DELTA, SANS_COTE, makeItem } from "./helpers.ts";
 
 const score = (title: string, extra = {}) =>
   scoreItem(makeItem({ title, ...extra }), DRACAUFEU).match;
@@ -175,9 +176,72 @@ describe("scoreItem — écart à la cote", () => {
   });
 });
 
+/**
+ * Les cartes dont le nom officiel porte un symbole étaient cassées aux deux
+ * bouts : la requête cherchait une graphie que personne n'écrit, et le titre
+ * qui revenait quand même — trouvé par son numéro — était recalé faute de nom
+ * reconnu. Les deux extrémités partagent désormais `searchName`, et ces tests
+ * vérifient surtout qu'elles ne redivergent pas.
+ */
+describe("searchName — symboles du nom officiel", () => {
+  it("traduit l'étoile en « gold star », comme l'écrivent les vendeurs", () => {
+    assert.equal(searchName(DRACAUFEU_STAR), "Dracaufeu gold star");
+  });
+
+  /** Mesuré : « Eoko delta 1/17 » ne ramène rien, « Eoko 1/17 » ramène la carte. */
+  it("retire le delta au lieu de le traduire", () => {
+    assert.equal(searchName(EOKO_DELTA), "Eoko");
+  });
+
+  it("traduit le losange des Prism Star", () => {
+    assert.equal(searchName({ id: "x", localId: "1", name: "Victini ◇" }), "Victini prism star");
+  });
+
+  it("ramène le trait d'union à une espace, sans coller les mots", () => {
+    assert.equal(searchName({ id: "x", localId: "1", name: "Latias-ex" }), "Latias ex");
+  });
+
+  it("laisse intact un nom sans symbole", () => {
+    assert.equal(searchName(DRACAUFEU), "Dracaufeu");
+  });
+});
+
+describe("scoreItem — noms à symboles", () => {
+  it("reconnaît le nom dans un titre écrit comme les vendeurs l'écrivent", () => {
+    const match = scoreItem(
+      makeItem({ title: "Dracaufeu Gold star 100/101 Îles des dragons" }),
+      DRACAUFEU_STAR,
+    ).match;
+    assert.equal(match.name, true);
+    assert.equal(match.number, true);
+    assert.ok(match.score >= STRONG_SCORE);
+  });
+
+  /** Le cas qui motivait tout : « dracaufeu ☆ δ » ne se trouve dans aucun titre. */
+  it("ne cherche plus le symbole dans le titre", () => {
+    const match = scoreItem(makeItem({ title: "Dracaufeu gold star 100/101" }), DRACAUFEU_STAR)
+      .match;
+    assert.equal(match.name, true);
+  });
+
+  it("reconnaît une carte delta par son nom nu", () => {
+    const match = scoreItem(makeItem({ title: "Carte Eoko pop 4 1/17" }), EOKO_DELTA).match;
+    assert.equal(match.name, true);
+    assert.equal(match.number, true);
+  });
+});
+
 describe("bestQuery", () => {
   it("préfère le numéro imprimé complet — c'est lui qui classe la page 1", () => {
     assert.equal(bestQuery(DRACAUFEU), "Dracaufeu 4/102");
+  });
+
+  it("compose « nom traduit + numéro » sur une carte à étoile", () => {
+    assert.equal(bestQuery(DRACAUFEU_STAR), "Dracaufeu gold star 100/101");
+  });
+
+  it("compose la requête d'une carte delta sans le symbole", () => {
+    assert.equal(bestQuery(EOKO_DELTA), "Eoko 1/17");
   });
 
   it("se rabat sur le numéro local quand le total est inconnu", () => {

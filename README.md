@@ -48,6 +48,80 @@ La pénalité sur les reproductions est calibrée pour faire passer sous le seui
 dont le titre est par ailleurs parfait. Sans elle, un proxy à 3 € affichait −97 % et trônait en tête
 des « meilleures affaires ».
 
+### Les lots ont leur propre recherche, et leur notation inverse
+
+Le `−2` ci-dessus est ce qu'il faut pour un fil de cartes à l'unité, et exactement ce qu'il ne faut
+pas pour qui cherche un lot. Pire, il les rend **invisibles** : un titre comme `Lot de 200 cartes
+Pokémon dont Dracaufeu` vaut 4 − 2 = 2, sous le seuil large, et n'atteint donc jamais le disque.
+Les gros lots — ceux qui ne citent ni numéro ni extension — étaient structurellement absents.
+
+La section **Lots** (`lib/lots.ts`) les collecte donc à part, en deux onglets qui répondent à deux
+questions opposées : **Récents**, le flux de ce qui vient d'être mis en ligne, et **Vos cartes**,
+les lots dont le titre cite une carte suivie.
+
+#### Onglet « Récents » — arriver tôt
+
+C'est l'onglet par défaut, et l'inverse exact de tout le reste du site : **on ne part d'aucune
+carte**. Un lot ne dit pas ce qu'il contient, et le vendeur qui liquide un classeur au poids ne le
+sait pas toujours lui-même — c'est précisément ce qui en fait une affaire. La seule chose qui compte
+est donc d'arriver avant les autres, d'où un tri par date de mise en ligne et non par pertinence, et
+les tris `newest_first` / `newly_listed` côté catalogues.
+
+Sans carte de référence, la notation ne s'applique plus : il faut trancher sur le titre nu
+(`isPokemonLot`). Trois conditions, dont la première n'a rien de théorique — interrogé avec
+`lot cartes pokemon`, le catalogue Vinted rend un maillot de football et un pantalon dans ses cinq
+premiers résultats :
+
+1. le mot `pokemon` en toutes lettres, sans quoi le flux serait à moitié composé de vêtements ;
+2. un mot de lot (`lot`, `vrac`, `classeur`, `collection complète`…) ;
+3. ni reproduction, ni **carte-code**.
+
+Les cartes-code sont les jetons de recharge du jeu en ligne, sans valeur pour un collectionneur.
+Elles se vendent par centaines pour quelques euros et coiffent donc mécaniquement tout classement au
+prix par carte — mesuré sur le flux réel : `Lot 270 Cartes Code Pokémon` à **0,03 €/carte**, premier
+devant `Gros lot 451 cartes Pokémon Rivalités Destinées` à 0,06 €.
+
+Un seul instantané, partagé par tout le site, valable un quart d'heure : les requêtes ne dépendent
+d'aucune collection. **Huit recherches** par quart d'heure pour l'ensemble des visiteurs, là où
+l'onglet « Vos cartes » en coûte quatre *par carte suivie*. La fraîcheur y est le produit, d'où une
+validité plus courte que partout ailleurs.
+
+Relevé sur une collecte réelle : 120 lots retenus (43 Vinted, 77 eBay), tous datés, les plus récents
+mis en ligne **une minute plus tôt**, et 74 annonçant une quantité.
+
+#### Onglet « Vos cartes » — savoir ce qu'on cherche
+
+Plus ciblé, forcément plus étroit : un lot de trois cents cartes ne nomme personne. Trois
+différences avec le fil :
+
+| | Fil des cartes | Section Lots |
+| --- | --- | --- |
+| Requête | `Dracaufeu 4/102` | `lot Dracaufeu`, `lot cartes Set de Base` |
+| Mot « lot » | −2 | +3, et **éliminatoire** en son absence |
+| Reproduction | −8 | éliminatoire |
+| Validité de l'instantané | 10 min | 30 min |
+| Écart à la cote | affiché | jamais |
+
+Le seuil de rétention (6) se lit « c'est bien un lot, **et** quelque chose le rattache à la carte
+suivie » : sans cette seconde condition, la section afficherait le même vrac générique pour toutes
+les cartes de la collection.
+
+L'écart à la cote est tu, et c'est le point qui a dicté le reste : un lot ne contient pas deux cents
+fois la même carte. Comparer 60 € à la cote d'un seul Dracaufeu afficherait `−85 %` et raflerait tout
+classement. À la place, le titre est lu pour y trouver une quantité (`lot de 200`, `200 cartes`,
+`x150`), d'où un **prix par carte** — la seule grandeur qui rende deux lots comparables. Les numéros
+imprimés sont retirés avant cette lecture, faute de quoi `Dracaufeu 4/102` livrerait un lot de
+102 cartes et un prix par carte inventé. Quand le titre ne dit rien, le prix par carte reste vide
+plutôt que deviné, et ces lots-là se classent en queue.
+
+Les enchères en cours n'en ont pas non plus : leur prix n'est pas un prix demandé, et il baisserait
+mécaniquement le classement de tous les lots à prix fixe.
+
+La collecte est **différée** : dépliez la section pour la déclencher. Elle vaut deux requêtes par
+place de marché et par carte, soit quatre-vingts recherches pour vingt cartes suivies — les lancer à
+chaque chargement de page pour une section qu'on ne regarde pas à chaque visite serait indéfendable
+vis-à-vis des catalogues. Ce qui est déjà sur le disque s'affiche en revanche immédiatement.
+
 ### Le texte de la requête compte, même si Vinted l'ignore
 
 Vinted renvoie le même volume quelle que soit la formulation, mais son *classement* change — et
@@ -61,6 +135,38 @@ seule la première page (48 annonces) est lue. Mesuré sur `base1-4` :
 
 Le serveur compose donc lui-même la requête la plus discriminante (`lib/match.ts` → `bestQuery`), à
 partir du numéro imprimé que seul il connaît.
+
+### Les noms à symboles, que personne n'écrit
+
+TCGdex publie le nom officiel de `ex15-100` : **`Dracaufeu ☆ δ`** — étoile blanche (U+2606) et
+delta (U+03B4). Aucune annonce n'est rédigée ainsi ; les vendeurs écrivent `Dracaufeu Gold star
+100/101`. Le symbole cassait donc les **deux bouts** de la chaîne à la fois : la requête envoyée aux
+catalogues, et la reconnaissance du nom dans les titres qui en revenaient. Une carte trouvée par son
+numéro était recalée faute de nom reconnu — 4 + 3 = 7, sous le seuil strict.
+
+`searchName` traduit désormais ces symboles, et sert aux deux extrémités : composer la requête, et
+comparer les titres reçus. Chaque règle est **mesurée** sur le catalogue Vinted :
+
+| Requête | Nom reconnu | Fortes |
+| --- | --- | --- |
+| `Dracaufeu ☆ δ 100/101` *(avant)* | 0 | 0 |
+| `Dracaufeu gold star 100/101` | 5 | 4 |
+| `Dracaufeu gold star delta 100/101` | 0 | 0 |
+| `Eoko 1/17` | 4 | 3 |
+| `Eoko delta 1/17` | 0 | 0 |
+
+D'où deux traitements opposés :
+
+- **`★` `☆` → `gold star`**, **`◇` → `prism star`** : ce sont les noms sous lesquels ces cartes se
+  vendent réellement. `Mew ☆ δ` passe de 0 à 9 correspondances fortes.
+- **`δ` → retiré**, pas traduit. Les vendeurs ne le mentionnent pas, et l'ajouter fait dériver la
+  requête vers des objets qui n'ont de la carte que le nom — jusqu'à une gravure sur bois. Le numéro
+  imprimé suffit à désigner la carte.
+
+L'apostrophe typographique `’` devient l'apostrophe droite du clavier, et les tirets longs une
+espace : `Latias-ex` se cherche `Latias ex`, parce que ni `Latias-ex` ni `latiasex` ne se retrouvent
+dans un titre d'annonce. La recherche libre de la fiche carte suit la même règle, `suggestedQueries`
+partageant `searchName`.
 
 ### Deux passes, systématiquement
 
@@ -189,7 +295,14 @@ plan de site.
 
 `lib/match.ts` décide qu'une annonce parle bien de *cette* carte : c'est là que se joue la valeur du
 site, et c'est de la logique pure. La suite couvre la notation, les requêtes construites, la
-limitation de débit et les statistiques de prix — 47 assertions, aucune dépendance.
+limitation de débit et les statistiques de prix — aucune dépendance.
+
+`tests/lots.test.ts` mérite une mention, parce que `match.ts` y porte désormais deux règles
+inverses : ce que la notation des cartes pénalise, celle des lots exige. Deux jeux de poids dans le
+même fichier se contredisent vite, et c'est bien arrivé — la pénalité de −8 sur les reproductions,
+suffisante à l'unité, laissait passer `lot de 10 cartes custom Dracaufeu 4/102 Set de Base` à
+exactement le seuil, un lot cumulant un signal de plus qu'une carte seule. D'où l'élimination pure
+et simple, et le test qui la fige.
 
 Node 24 exécute le TypeScript nativement mais applique la résolution ESM stricte, qui refuse les
 imports sans extension. `tests/resolve-ts.mjs` ajoute ce chaînon manquant avec `module.registerHooks`,
@@ -209,10 +322,13 @@ app/
   api/cards/route.ts        proxy TCGdex + préchauffage des visuels
   api/carte-image/route.ts  visuels servis depuis le cache disque
   api/feed/route.ts         rafraîchissement d'une carte du fil
+  api/lots/route.ts         rafraîchissement des lots d'une carte
+  api/lots/recents/route.ts flux des lots Pokémon récemment mis en ligne
   api/vinted/route.ts       recherche Vinted + notation (fiche carte)
 proxy.ts                    limitation de débit devant /api/*
 components/
   Dashboard.tsx             collection, filtres et fil — l'état partagé de l'accueil
+  Lots.tsx                  section des lots : onglets Récents / Vos cartes
   OfferRow.tsx              une annonce, en ligne
   CardSearch.tsx            barre de recherche et aperçu clavier
   CollectionStrip.tsx       bandeau des cartes épinglées, qui filtre le fil
@@ -225,6 +341,7 @@ lib/
   auth.ts                   mots de passe, jetons, session
   store.ts                  comptes, favoris, repère du badge « nouveau »
   feed.ts                   instantanés du fil, collecte, fraîcheur
+  lots.ts                   lots : flux récent partagé + lots par carte suivie
   sightings.ts              annonces déjà vues, statistiques de prix
   rate-limit.ts             seau à jetons en mémoire
   json-file.ts              lecture/écriture atomique, sérialisation par clé
@@ -249,6 +366,16 @@ tests/                      node:test — match, rate-limit, sightings, format
 - « Prix observés » est un prix **demandé**, pas un prix de vente : le catalogue Vinted ne dit pas à
   quel prix une annonce est partie, ni même si elle est partie.
 - Vinted plafonne les résultats à ~20 pages ; les requêtes ciblées restent préférables.
+- La section Lots retient aussi les produits scellés — `coffret`, `display`, `booster` font partie
+  des mots qui signalent un lot. Un « Coffret Méga-Latias-ex (4 boosters) » y figure donc, sans
+  quantité de cartes annoncée, donc sans prix par carte. C'est adjacent à ce qu'on cherche plutôt
+  que faux, mais ce n'est pas un lot de cartes.
+- Un lot est rattaché à une carte parce que son titre la cite, elle ou son extension. Rien ne
+  garantit qu'elle soit réellement dedans : `lot cartes Set de Base` en dit autant sur son contenu
+  que le vendeur a bien voulu en dire.
+- La traduction des symboles vaut pour la recherche d'**annonces**, pas pour la recherche de
+  **cartes** de l'en-tête : celle-ci interroge TCGdex, qui ne connaît que le nom officiel. Taper
+  `dracaufeu gold star` n'y trouve rien ; `dracaufeu` remonte la carte, symbole compris.
 
 ## Suite possible
 

@@ -110,6 +110,65 @@ export function normalize(value: string): string {
 }
 
 /**
+ * Symboles que TCGdex imprime dans le nom, et qu'aucune annonce n'emploie.
+ *
+ * Le nom officiel de la carte `ex15-100` est « Dracaufeu ☆ δ ». Personne
+ * n'écrit cela : les vendeurs disent « Dracaufeu Gold star 100/101 ». Le
+ * symbole cassait donc les deux bouts de la chaîne à la fois — la requête
+ * envoyée aux catalogues, et la reconnaissance du nom dans les titres reçus.
+ *
+ * Chaque règle est mesurée sur le catalogue Vinted, pas supposée :
+ *
+ * | Requête | Nom reconnu | Fortes |
+ * | --- | --- | --- |
+ * | `Dracaufeu ☆ δ 100/101` | 0 | 0 |
+ * | `Dracaufeu gold star 100/101` | 5 | 3 |
+ * | `Dracaufeu gold star delta 100/101` | 0 | 0 |
+ * | `Eoko 1/17` | 4 | 3 |
+ * | `Eoko delta 1/17` | 0 | 0 |
+ *
+ * D'où le sort réservé au delta : il est **retiré**, pas traduit. Les vendeurs
+ * ne le mentionnent pas, et l'ajouter à la requête la fait dériver vers des
+ * objets qui n'ont de la carte que le nom — jusqu'à des gravures sur bois. Le
+ * numéro imprimé, lui, suffit à désigner la carte sans ambiguïté.
+ *
+ * L'étoile et le losange sont au contraire traduits : « gold star » et « prism
+ * star » sont les noms sous lesquels ces cartes se vendent réellement.
+ */
+const NAME_SYMBOLS: { pattern: RegExp; replacement: string }[] = [
+  // ★ U+2605, ☆ U+2606
+  { pattern: /[★☆]/g, replacement: " gold star " },
+  // ◇ U+25C7
+  { pattern: /◇/g, replacement: " prism star " },
+  // δ U+03B4 — voir ci-dessus.
+  { pattern: /δ/g, replacement: " " },
+  // ’ U+2019 : les vendeurs tapent l'apostrophe droite de leur clavier.
+  { pattern: /’/g, replacement: "'" },
+  // Traits d'union et tirets longs. Depuis Écarlate & Violet, la carte
+  // s'imprime « Latias-ex » — le nom officiel, celui que publie TCGdex. Aucun
+  // vendeur ne l'écrit ainsi. L'effacer ne suffirait pas : « latiasex » ne se
+  // retrouve pas davantage dans « latias ex ». Il faut une espace.
+  { pattern: /[-‐‑‒–—]+/g, replacement: " " },
+];
+
+/**
+ * Nom tel qu'on le cherche, par opposition au nom tel qu'il est imprimé.
+ *
+ * Sert aux deux extrémités : composer la requête envoyée aux catalogues, et
+ * reconnaître le nom dans les titres qui en reviennent. Les deux doivent parler
+ * la même langue, faute de quoi on chercherait une graphie pour en attendre une
+ * autre — c'est exactement ce qui se passait sur les cartes à étoile, trouvées
+ * par leur numéro puis recalées faute de nom reconnu.
+ */
+export function searchName(card: CardDetail): string {
+  let name = card.name;
+  for (const { pattern, replacement } of NAME_SYMBOLS) {
+    name = name.replace(pattern, replacement);
+  }
+  return name.replace(/\s+/g, " ").trim();
+}
+
+/**
  * Présence d'un mot entier.
  *
  * La recherche par sous-chaîne se trompait dans les deux sens : « lot » ne
@@ -150,7 +209,10 @@ function setKeywords(setName: string): string[] {
 
 export function scoreItem<T extends Scorable>(item: T, card: CardDetail): Scored<T> {
   const title = normalize(item.title);
-  const cardName = normalize(card.name);
+  // `searchName` et non `card.name` : c'est la graphie des annonces qu'on
+  // cherche dans un titre d'annonce. Comparer le nom officiel reviendrait à
+  // chercher « dracaufeu ☆ δ » dans « Dracaufeu Gold star 100/101 ».
+  const cardName = normalize(searchName(card));
   const total = card.set?.cardCount?.official;
 
   const name = cardName.length > 2 && title.includes(cardName);
@@ -199,6 +261,134 @@ export function scoreAll<T extends Scorable>(items: T[], card: CardDetail): Scor
   return items.map((item) => scoreItem(item, card));
 }
 
+/* ------------------------------------------------------------------- lots */
+
+/**
+ * Notation d'un lot, à l'envers de celle d'une carte à l'unité.
+ *
+ * `scoreItem` retire deux points au mot « lot » : le prix ne se rapporte pas à
+ * une carte, donc l'écart à la cote serait faux. Ici c'est l'inverse — un lot
+ * est ce qu'on cherche, et une annonce à l'unité n'a rien à faire dans la
+ * section. Le signal devient donc éliminatoire plutôt que pénalisant.
+ */
+const LOT_SIGNAL = 3;
+
+/**
+ * Seuil de rétention. Vaut `LOT_SIGNAL` plus le plus faible des signaux de
+ * carte, ce qui se lit : « c'est bien un lot, **et** quelque chose le rattache
+ * à la carte suivie ». Un lot qui ne cite ni le nom, ni le numéro, ni
+ * l'extension tombe à 3 et sort — sans quoi la section afficherait le même
+ * vrac générique pour toutes les cartes de la collection.
+ */
+export const LOT_SCORE = 6;
+
+/**
+ * Quantité annoncée dans le titre, quand il en donne une.
+ *
+ * C'est le seul chiffre qui rende deux lots comparables : « 45 € » ne dit rien,
+ * « 45 € pour 300 cartes » dit tout. Rendue `null` plutôt que devinée quand le
+ * titre reste muet — un prix par carte inventé serait pire que pas de prix.
+ */
+export function lotSize(title: string): number | null {
+  // Les numéros imprimés partent d'abord : « Dracaufeu 4/102 » livrerait
+  // sinon un lot de 102 cartes, et le prix par carte qui va avec.
+  const cleaned = normalize(title).replace(/\d+\s*\/\s*\d+/g, " ");
+
+  const patterns = [
+    // « 200 cartes », « 200 cartes pokemon ». D'abord, car c'est la forme la
+    // plus explicite : le nombre y est collé à ce qu'il compte.
+    //
+    // La borne de gauche n'est pas décorative. Sans elle, la référence interne
+    // d'un vendeur suffit à tout fausser : « B1090 Carte Pokemon […] Vente en
+    // vrac 100 cartes » livrait un lot de **1090** cartes, le moteur ayant
+    // attrapé les chiffres de `B1090` suivis de « Carte » avant d'arriver au
+    // vrai décompte. Le prix par carte affiché s'en trouvait divisé par dix.
+    /(?:^|[^a-z0-9])(\d{1,4})\s*cartes?\b/,
+    // « lot de 200 », sans que « cartes » suive.
+    /\blots?\s+de\s+(\d{1,4})\b/,
+    // « lot x200 », « x 200 ».
+    /\bx\s*(\d{1,4})\b/,
+  ];
+
+  for (const pattern of patterns) {
+    const found = cleaned.match(pattern);
+    if (!found) continue;
+    const size = Number.parseInt(found[1], 10);
+    // Un lot d'une carte n'est pas un lot ; au-delà de quelques milliers, le
+    // nombre lu est une année ou une référence, pas un contenu.
+    if (size >= 2 && size <= 5000) return size;
+  }
+
+  return null;
+}
+
+/**
+ * Note une annonce en tant que lot. Les signaux sont ceux de `scoreItem` — le
+ * travail d'analyse du titre ne change pas — seule leur pondération diffère.
+ */
+export function scoreLot<T extends Scorable>(item: T, card: CardDetail): Scored<T> {
+  const scored = scoreItem(item, card);
+  const { name, number, set, bulk, fake } = scored.match;
+
+  /**
+   * La reproduction est éliminatoire ici, là où `scoreItem` se contente de
+   * retirer huit points. Ce n'est pas une sévérité gratuite : un lot cumule un
+   * signal de plus qu'une carte à l'unité — le sien s'ajoute au nom, au numéro
+   * et à l'extension — et culmine donc à 14 au lieu de 11. Le même retrait de
+   * huit points laisse « lot de 10 cartes custom Dracaufeu 4/102 Set de Base »
+   * exactement à 6, soit le seuil, donc retenu.
+   */
+  let score = 0;
+  if (bulk && !fake) {
+    score = LOT_SIGNAL;
+    if (name) score += 4;
+    if (number) score += 4;
+    if (set) score += 3;
+    if (item.promoted) score -= 1;
+  }
+
+  return { ...scored, match: { ...scored.match, score } };
+}
+
+export function scoreLots<T extends Scorable>(items: T[], card: CardDetail): Scored<T>[] {
+  return items.map((item) => scoreLot(item, card));
+}
+
+/**
+ * Un lot de cartes Pokémon, jugé sur son seul titre.
+ *
+ * Tout le reste du fichier note une annonce **par rapport à une carte** : le
+ * nom, le numéro, l'extension. Le flux des lots récents n'a pas de carte de
+ * référence — c'est précisément son intérêt, on ne sait pas encore ce qu'il y a
+ * dedans. Il faut donc trancher sur le titre nu.
+ *
+ * L'ancrage Pokémon n'est pas une précaution théorique : interrogé avec « lot
+ * cartes pokemon », le catalogue Vinted rend un maillot de football et un
+ * pantalon dans ses cinq premiers résultats. La recherche est floue, et sans ce
+ * garde-fou le flux serait à moitié composé de vêtements.
+ */
+export function isPokemonLot(title: string): boolean {
+  const text = normalize(title);
+  // `normalize` a déjà retiré l'accent : « Pokémon » et « pokemon » convergent.
+  if (!hasWord(text, "pokemon")) return false;
+  if (!hasAny(text, BULK_WORDS)) return false;
+  // Un lot de reproductions n'est jamais une affaire, quel que soit son prix.
+  if (hasAny(text, FAKE_WORDS)) return false;
+  return !hasAny(text, CODE_WORDS);
+}
+
+/**
+ * Cartes-code : les jetons de recharge du jeu en ligne, distribués dans les
+ * boosters et sans aucune valeur pour un collectionneur.
+ *
+ * Elles se vendent par centaines pour quelques euros, ce qui les place
+ * mécaniquement en tête de tout classement au prix par carte — mesuré sur le
+ * flux réel : « Lot 270 Cartes Code Pokémon » à 0,03 €/carte, premier de la
+ * liste devant 451 vraies cartes à 0,06 €. Les garder reviendrait à faire de
+ * l'onglet une vitrine de ce qu'on ne cherche pas.
+ */
+const CODE_WORDS = ["code", "codes"];
+
 /* ------------------------------------------------------------------- état */
 
 export type Condition = "neuf" | "excellent" | "bon" | "correct" | null;
@@ -235,16 +425,6 @@ export const CONDITION_LABELS: Record<NonNullable<Condition>, string> = {
  * la première page est lue. Mesuré sur la carte base1-4 : « Dracaufeu 4/102 »
  * remonte 29 correspondances fortes en page 1, « Dracaufeu carte pokemon » aucune.
  */
-/**
- * Nom tel qu'on le cherche, par opposition au nom tel qu'il est imprimé.
- *
- * Chercher « Latias-ex » revient à chercher une graphie que personne n'emploie
- * dans une annonce ; on interroge donc les catalogues avec « Latias ex ».
- */
-function searchName(card: CardDetail): string {
-  return card.name.replace(/[-‐‑‒–—]+/g, " ").replace(/\s+/g, " ").trim();
-}
-
 export function bestQuery(card: CardDetail): string {
   const name = searchName(card);
   const printed = cardNumber(card);
@@ -252,6 +432,32 @@ export function bestQuery(card: CardDetail): string {
   if (card.localId) return `${name} ${card.localId}`;
   if (card.set?.name) return `${name} ${card.set.name}`;
   return `${name} carte pokemon`;
+}
+
+/**
+ * Requêtes destinées à faire remonter des lots.
+ *
+ * `bestQuery` ne les trouve pas, et ce n'est pas un défaut : elle cherche
+ * « Dracaufeu 4/102 », quand un lot s'annonce « lot de 200 cartes Pokémon ».
+ * Les deux titres n'ont aucun mot en commun hormis le nom, que les gros lots
+ * ne citent justement pas. Il faut donc interroger les catalogues autrement,
+ * en partant du mot « lot » plutôt que de la carte.
+ */
+export function lotQueries(card: CardDetail): string[] {
+  const queries = [`lot ${searchName(card)}`];
+
+  // L'extension ouvre sur les lots qui ne nomment aucune carte — « lot Base
+  // Set », « lot Écarlate et Violet ». Ce sont les plus volumineux, et les
+  // seuls que la requête par nom ne peut pas atteindre.
+  if (card.set?.name) queries.push(`lot cartes ${card.set.name}`);
+
+  const seen = new Set<string>();
+  return queries.filter((query) => {
+    const key = normalize(query);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 /** Requêtes proposées à l'utilisateur, de la plus large à la plus ciblée. */
