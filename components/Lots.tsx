@@ -13,7 +13,7 @@ import { CONDITION_LABELS } from "@/lib/match";
 import type { FavoriteCard } from "@/lib/store";
 
 /**
- * Section « Lots », en deux onglets qui répondent à deux questions opposées.
+ * La page « Mes lots », en deux onglets qui répondent à deux questions opposées.
  *
  * **Récents** — les lots Pokémon qui viennent d'être mis en ligne, toutes
  * cartes confondues. C'est là que se font les affaires : un gros lot ne dit pas
@@ -21,14 +21,17 @@ import type { FavoriteCard } from "@/lib/store";
  * pas toujours lui-même. La seule chose qui compte est d'arriver tôt, d'où le
  * tri par date et non par pertinence.
  *
- * **Vos cartes** — les lots dont le titre cite une carte de la collection. Plus
- * ciblé, mais forcément plus étroit : un lot de trois cents cartes ne nomme
- * personne.
+ * **Ma collection** — les lots dont le titre cite une carte suivie. Plus ciblé,
+ * mais forcément plus étroit : un lot de trois cents cartes ne nomme personne.
+ * L'onglet ne s'appelle pas « Vos cartes » : « Mes cartes », dans l'en-tête,
+ * désigne l'autre fil du site, et deux libellés voisins pour deux choses
+ * différentes à trente pixels l'un de l'autre ne pouvaient que se confondre.
  *
- * La section est repliée par défaut, et ne cherche qu'une fois dépliée. Les
- * deux onglets ne coûtent d'ailleurs pas la même chose : le flux récent vaut
- * huit recherches pour tout le site, les lots par carte quatre **par carte
- * suivie**. Ce qui est déjà sur le disque s'affiche sans rien coûter.
+ * Une page à part, et non plus une section sous le fil : elle était alors
+ * repliable, et repliée elle ne rendait pas même ses onglets. Les deux onglets
+ * ne coûtent d'ailleurs pas la même chose : le flux récent vaut huit recherches
+ * pour tout le site, les lots par carte quatre **par carte suivie** — mais on
+ * n'arrive plus ici que sur demande, ce qui rend cette dépense volontaire.
  */
 
 type Tab = "recents" | "cards";
@@ -41,7 +44,6 @@ const SORTS: { value: LotSort; label: string }[] = [
 ];
 
 interface LotPrefs {
-  open: boolean;
   tab: Tab;
   /** Un tri par onglet : « récents » veut une date, « vos cartes » un prix. */
   sortRecent: LotSort;
@@ -53,16 +55,14 @@ interface LotPrefs {
 /**
  * Constante de module : c'est la clé de mémoïsation de `usePersisted`.
  *
- * Dépliée par défaut. La première version ne l'était pas, pour épargner des
- * requêtes aux catalogues — le résultat était une ligne de texte de dix pixels
- * en bas d'un fil de deux cents annonces, que personne ne voyait. L'économie
+ * Il n'y a plus de préférence d'ouverture. Elle a existé, pour épargner des
+ * requêtes aux catalogues, et le résultat était une ligne de dix pixels en bas
+ * d'un fil de cent trente-cinq annonces que personne n'atteignait. L'économie
  * n'en était pas une : l'onglet par défaut coûte huit recherches par quart
  * d'heure **pour tout le site**, puisque son instantané ne dépend d'aucune
- * collection. C'est l'onglet « Vos cartes » qui est cher, et lui ne cherche
- * qu'une fois ouvert.
+ * collection.
  */
 const DEFAULT_PREFS: LotPrefs = {
-  open: true,
   tab: "recents",
   sortRecent: "date",
   sortCards: "perCard",
@@ -103,54 +103,42 @@ export default function Lots({
   const tab: Tab = prefs.tab === "cards" ? "cards" : "recents";
 
   return (
-    /* La bordure haute sépare les lots du fil : ce sont deux marchandises
-       différentes, et sans elle la section se lisait comme la suite des
-       annonces à l'unité. */
-    <section className="flex flex-col gap-3 border-t border-line pt-5">
-      <div className="flex flex-wrap items-center gap-2">
-        <h2 className="mr-1 text-sm font-bold">
+    <section className="flex flex-col gap-3">
+      {/* Collé sous l'en-tête, comme la barre d'outils du fil : sur une page de
+          cent lots, changer d'onglet imposerait sinon de remonter tout en haut. */}
+      <div className="sticky top-14 z-20 -mx-4 flex flex-wrap items-center gap-2 border-b border-line bg-bg/95 px-4 py-2 backdrop-blur">
+        <h1 className="mr-1 text-sm font-bold">
           Lots
           <span className="ml-2 text-[11px] font-normal text-faint">
             {tab === "recents"
               ? "les derniers mis en ligne, toutes cartes confondues"
               : "ceux dont le titre cite une de vos cartes"}
           </span>
-        </h2>
+        </h1>
 
-        {prefs.open && (
-          <div
-            role="group"
-            aria-label="Onglets des lots"
-            className="flex h-8 items-center gap-0.5 rounded-lg border border-line bg-panel-2 p-0.5"
-          >
-            <TabButton
-              active={tab === "recents"}
-              onClick={() => updatePrefs({ tab: "recents" })}
-              hint="Les lots Pokémon qui viennent d’être mis en ligne, toutes cartes confondues"
-            >
-              Récents
-            </TabButton>
-            <TabButton
-              active={tab === "cards"}
-              onClick={() => updatePrefs({ tab: "cards" })}
-              hint="Les lots dont le titre cite une carte de votre collection"
-            >
-              Vos cartes
-            </TabButton>
-          </div>
-        )}
-
-        <button
-          type="button"
-          onClick={() => updatePrefs({ open: !prefs.open })}
-          aria-expanded={prefs.open}
-          className="control ml-auto"
+        <div
+          role="group"
+          aria-label="Onglets des lots"
+          className="flex h-8 items-center gap-0.5 rounded-lg border border-line bg-panel-2 p-0.5"
         >
-          {prefs.open ? "Replier" : "Déplier"}
-        </button>
+          <TabButton
+            active={tab === "recents"}
+            onClick={() => updatePrefs({ tab: "recents" })}
+            hint="Les lots Pokémon qui viennent d’être mis en ligne, toutes cartes confondues"
+          >
+            Récents
+          </TabButton>
+          <TabButton
+            active={tab === "cards"}
+            onClick={() => updatePrefs({ tab: "cards" })}
+            hint="Les lots dont le titre cite une carte de votre collection"
+          >
+            Ma collection
+          </TabButton>
+        </div>
       </div>
 
-      {prefs.open && tab === "recents" && (
+      {tab === "recents" && (
         <RecentPanel
           initial={initialRecent}
           isStale={recentIsStale}
@@ -162,7 +150,7 @@ export default function Lots({
         />
       )}
 
-      {prefs.open && tab === "cards" && (
+      {tab === "cards" && (
         <CardsPanel
           favorites={favorites}
           initialSnapshots={initialSnapshots}

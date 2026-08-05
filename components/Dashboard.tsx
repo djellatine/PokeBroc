@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { clearNewBadges } from "@/app/actions/favorites";
 import CollectionStrip, { type CardCount } from "@/components/CollectionStrip";
-import Lots from "@/components/Lots";
 import OfferRow from "@/components/OfferRow";
 import OfferTile from "@/components/OfferTile";
 import { useFrenchOnly } from "@/components/useFrenchOnly";
@@ -12,7 +11,6 @@ import { usePersisted } from "@/components/usePersisted";
 import type { FeedCard, FeedItem, Snapshot } from "@/lib/feed";
 import { percent, plural } from "@/lib/format";
 import { isForeignListing } from "@/lib/language";
-import type { LotSnapshot, RecentLots } from "@/lib/lots";
 import { STRONG_SCORE, WIDE_SCORE } from "@/lib/match";
 import type { FavoriteCard } from "@/lib/store";
 
@@ -106,20 +104,12 @@ export default function Dashboard({
   favorites,
   initialSnapshots,
   initialStaleIds,
-  initialLotSnapshots,
-  initialStaleLotIds,
-  initialRecentLots,
-  recentLotsStale,
   newSince,
   serverNow,
 }: {
   favorites: FavoriteCard[];
   initialSnapshots: Snapshot[];
   initialStaleIds: string[];
-  initialLotSnapshots: LotSnapshot[];
-  initialStaleLotIds: string[];
-  initialRecentLots: RecentLots | null;
-  recentLotsStale: boolean;
   /** Les annonces vues après cette date portent la pastille « nouveau ». */
   newSince: number;
   /** Horloge du serveur, pour que le premier rendu client soit identique. */
@@ -522,19 +512,6 @@ export default function Dashboard({
           </Link>
         )}
       </section>
-
-      {/* Sous le fil, et non mêlée à lui : un lot ne se compare pas à une carte
-          à l'unité — ni par le prix, ni par l'écart à la cote, que la section
-          n'affiche pas. Les trier ensemble reviendrait à classer un classeur de
-          300 cartes à 80 € parmi des Dracaufeu à 12 €. */}
-      <Lots
-        favorites={favorites}
-        initialSnapshots={initialLotSnapshots}
-        initialStaleIds={initialStaleLotIds}
-        initialRecent={initialRecentLots}
-        recentIsStale={recentLotsStale}
-        serverNow={serverNow}
-      />
     </div>
   );
 }

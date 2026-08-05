@@ -417,6 +417,38 @@ export async function readRecentLots(): Promise<RecentLots | null> {
   return snapshot;
 }
 
+/** Tout ce que la page `/lots` doit lire, y compris son horloge. */
+export interface LotsView {
+  snapshots: LotSnapshot[];
+  /** Cartes dont l'instantané manque ou a expiré, à rattraper côté client. */
+  staleIds: string[];
+  recent: RecentLots | null;
+  recentIsStale: boolean;
+  /**
+   * Horloge du serveur, renvoyée plutôt que relue par l'appelant — pour la même
+   * raison que `FeedVisit.now` : une page qui appelle `Date.now()` pendant son
+   * rendu n'est plus pure, et son rendu cesserait de coïncider avec celui du
+   * client sur les « il y a 3 min ». Une seule lecture sert donc aux deux
+   * fraîcheurs *et* au premier rendu, qui ne peuvent ainsi pas diverger.
+   */
+  now: number;
+}
+
+/** Les deux onglets d'un coup, depuis le disque seul : aucune requête réseau. */
+export async function readLotsView(favorites: FavoriteCard[]): Promise<LotsView> {
+  const now = Date.now();
+
+  const [snapshots, recent] = await Promise.all([readLotSnapshots(favorites), readRecentLots()]);
+
+  return {
+    snapshots,
+    staleIds: staleLotCardIds(favorites, snapshots, now),
+    recent,
+    recentIsStale: !recentsAreFresh(recent, now),
+    now,
+  };
+}
+
 /**
  * Interroge une place de marché sur toutes les requêtes génériques.
  *

@@ -55,9 +55,20 @@ pas pour qui cherche un lot. Pire, il les rend **invisibles** : un titre comme `
 Pokémon dont Dracaufeu` vaut 4 − 2 = 2, sous le seuil large, et n'atteint donc jamais le disque.
 Les gros lots — ceux qui ne citent ni numéro ni extension — étaient structurellement absents.
 
-La section **Lots** (`lib/lots.ts`) les collecte donc à part, en deux onglets qui répondent à deux
-questions opposées : **Récents**, le flux de ce qui vient d'être mis en ligne, et **Vos cartes**,
-les lots dont le titre cite une carte suivie.
+La page **Mes lots** (`/lots`, `lib/lots.ts`) les collecte donc à part, en deux onglets qui
+répondent à deux questions opposées : **Récents**, le flux de ce qui vient d'être mis en ligne, et
+**Ma collection**, les lots dont le titre cite une carte suivie.
+
+Deux routes, et non deux vues d'un même fil : la bascule `Mes cartes` / `Mes lots` de l'en-tête
+(`components/ModeSwitch.tsx`) change de page. Les lots ont d'abord vécu en section sous le fil, et
+l'endroit les condamnait — sur une collection de douze cartes, il fallait descendre **cinq écrans et
+demi** pour les atteindre. Pire, la section était repliable, et repliée elle ne rendait pas même ses
+onglets : une préférence `open: false` enregistrée du temps où elle l'était par défaut survivait au
+changement de défaut, `usePersisted` fusionnant la valeur stockée par-dessus. Les seuls à avoir déjà
+ouvert le site étaient donc précisément ceux à qui la section restait invisible.
+
+Le partage par route n'est pas qu'un rangement : la page des cartes ne lit plus un seul instantané
+de lot, et `/lots` ne rend pas les cent trente-cinq annonces du fil.
 
 #### Onglet « Récents » — arriver tôt
 
@@ -83,18 +94,20 @@ devant `Gros lot 451 cartes Pokémon Rivalités Destinées` à 0,06 €.
 
 Un seul instantané, partagé par tout le site, valable un quart d'heure : les requêtes ne dépendent
 d'aucune collection. **Huit recherches** par quart d'heure pour l'ensemble des visiteurs, là où
-l'onglet « Vos cartes » en coûte quatre *par carte suivie*. La fraîcheur y est le produit, d'où une
+l'onglet « Ma collection » en coûte quatre *par carte suivie*. La fraîcheur y est le produit, d'où une
 validité plus courte que partout ailleurs.
 
 Relevé sur une collecte réelle : 120 lots retenus (43 Vinted, 77 eBay), tous datés, les plus récents
 mis en ligne **une minute plus tôt**, et 74 annonçant une quantité.
 
-#### Onglet « Vos cartes » — savoir ce qu'on cherche
+#### Onglet « Ma collection » — savoir ce qu'on cherche
 
-Plus ciblé, forcément plus étroit : un lot de trois cents cartes ne nomme personne. Trois
-différences avec le fil :
+Plus ciblé, forcément plus étroit : un lot de trois cents cartes ne nomme personne. Il ne s'appelle
+pas « Vos cartes » : `Mes cartes`, dans l'en-tête, désigne l'autre fil du site, et deux libellés
+voisins pour deux choses différentes à trente pixels l'un de l'autre ne pouvaient que se confondre.
+Trois différences avec le fil :
 
-| | Fil des cartes | Section Lots |
+| | Fil des cartes | Page Lots |
 | --- | --- | --- |
 | Requête | `Dracaufeu 4/102` | `lot Dracaufeu`, `lot cartes Set de Base` |
 | Mot « lot » | −2 | +3, et **éliminatoire** en son absence |
@@ -103,8 +116,8 @@ différences avec le fil :
 | Écart à la cote | affiché | jamais |
 
 Le seuil de rétention (6) se lit « c'est bien un lot, **et** quelque chose le rattache à la carte
-suivie » : sans cette seconde condition, la section afficherait le même vrac générique pour toutes
-les cartes de la collection.
+suivie » : sans cette seconde condition, l'onglet afficherait le même vrac générique pour toutes les
+cartes de la collection.
 
 L'écart à la cote est tu, et c'est le point qui a dicté le reste : un lot ne contient pas deux cents
 fois la même carte. Comparer 60 € à la cote d'un seul Dracaufeu afficherait `−85 %` et raflerait tout
@@ -117,10 +130,11 @@ plutôt que deviné, et ces lots-là se classent en queue.
 Les enchères en cours n'en ont pas non plus : leur prix n'est pas un prix demandé, et il baisserait
 mécaniquement le classement de tous les lots à prix fixe.
 
-La collecte est **différée** : dépliez la section pour la déclencher. Elle vaut deux requêtes par
-place de marché et par carte, soit quatre-vingts recherches pour vingt cartes suivies — les lancer à
-chaque chargement de page pour une section qu'on ne regarde pas à chaque visite serait indéfendable
-vis-à-vis des catalogues. Ce qui est déjà sur le disque s'affiche en revanche immédiatement.
+La collecte ne part qu'une fois l'onglet ouvert. Elle vaut deux requêtes par place de marché et par
+carte, soit quatre-vingts recherches pour vingt cartes suivies — les lancer au chargement de la page
+d'accueil, que l'on regarde à chaque visite, serait indéfendable vis-à-vis des catalogues. C'est ce
+qui rend la route séparée pertinente au-delà de l'ergonomie : on n'arrive sur `/lots` qu'en le
+demandant, et la dépense devient volontaire. Ce qui est déjà sur le disque s'affiche immédiatement.
 
 ### Le texte de la requête compte, même si Vinted l'ignore
 
@@ -312,7 +326,8 @@ plutôt que de réécrire tout `lib/` pour satisfaire le lanceur de tests.
 
 ```
 app/
-  page.tsx                  accueil : présentation, ou tableau de bord
+  page.tsx                  accueil : présentation, ou fil des cartes suivies
+  lots/page.tsx             l'autre fil : les lots, en deux onglets
   layout.tsx                en-tête avec recherche permanente
   robots.ts, sitemap.ts     référencement des fiches cartes
   connexion/, inscription/  formulaires de compte
@@ -328,7 +343,8 @@ app/
 proxy.ts                    limitation de débit devant /api/*
 components/
   Dashboard.tsx             collection, filtres et fil — l'état partagé de l'accueil
-  Lots.tsx                  section des lots : onglets Récents / Vos cartes
+  Lots.tsx                  page des lots : onglets Récents / Ma collection
+  ModeSwitch.tsx            bascule Mes cartes / Mes lots, dans l'en-tête
   OfferRow.tsx              une annonce, en ligne
   CardSearch.tsx            barre de recherche et aperçu clavier
   CollectionStrip.tsx       bandeau des cartes épinglées, qui filtre le fil
@@ -366,7 +382,7 @@ tests/                      node:test — match, rate-limit, sightings, format
 - « Prix observés » est un prix **demandé**, pas un prix de vente : le catalogue Vinted ne dit pas à
   quel prix une annonce est partie, ni même si elle est partie.
 - Vinted plafonne les résultats à ~20 pages ; les requêtes ciblées restent préférables.
-- La section Lots retient aussi les produits scellés — `coffret`, `display`, `booster` font partie
+- La page Lots retient aussi les produits scellés — `coffret`, `display`, `booster` font partie
   des mots qui signalent un lot. Un « Coffret Méga-Latias-ex (4 boosters) » y figure donc, sans
   quantité de cartes annoncée, donc sans prix par carte. C'est adjacent à ce qu'on cherche plutôt
   que faux, mais ce n'est pas un lot de cartes.
