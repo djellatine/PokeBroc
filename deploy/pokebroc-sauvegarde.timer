@@ -1,0 +1,18 @@
+# 4 h du matin : le site ne sert personne, et la veille vient de finir son
+# passage de 3 h 45 — l'archive attrape donc un `.data` au repos plutôt qu'en
+# pleine réécriture. Les écritures étant atomiques, une collecte simultanée ne
+# corromprait rien ; c'est du confort, pas une garantie nécessaire.
+
+[Unit]
+Description=PokeBroc — sauvegarde quotidienne
+Documentation=https://github.com/djellatine/PokeBroc
+
+[Timer]
+OnCalendar=*-*-* 04:00:00
+Persistent=true
+# Le serveur peut avoir été éteint à 4 h. `Persistent` rattrape au démarrage, et
+# cette dispersion évite que le rattrapage tombe pile sur la reprise du service.
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target

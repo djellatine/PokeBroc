@@ -1,0 +1,18 @@
+# Trois heures, comme sous le planificateur Windows : mesuré, une requête produit
+# ~30 mises en ligne par heure et trois pages en couvrent trois heures.
+#
+# Décalé de cinq minutes sur l'heure ronde, là où la veille tombe sur les
+# quarts : sans cela les deux passages se déclencheraient ensemble quatre fois
+# par jour, et se disputeraient le processeur d'un petit serveur pour rien.
+
+[Unit]
+Description=PokeBroc — collecte leboncoin toutes les 3 heures
+Documentation=https://github.com/djellatine/PokeBroc
+
+[Timer]
+OnCalendar=0/3:05
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,24 @@
+# Une sauvegarde de `.data/`. Déclenchée par `pokebroc-sauvegarde.timer`.
+#
+# Tourne en root, à la différence des trois autres unités : la destination est
+# /var/backups, où l'utilisateur `pokebroc` n'a rien à faire — et n'a surtout
+# pas à pouvoir effacer ses propres sauvegardes.
+
+[Unit]
+Description=PokeBroc — sauvegarde quotidienne de .data
+Documentation=https://github.com/djellatine/PokeBroc
+
+[Service]
+Type=oneshot
+ExecStart=/srv/pokebroc/deploy/sauvegarde.sh
+
+TimeoutStartSec=5min
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/backups/pokebroc
+# `.data` en lecture seule : une sauvegarde n'a aucune raison d'écrire dans ce
+# qu'elle sauvegarde, et l'interdire écarte la pire des pannes possibles ici.
+ReadOnlyPaths=/srv/pokebroc/.data

@@ -1,0 +1,30 @@
+# Un passage de la veille. Déclenché par `pokebroc-veille.timer`, jamais seul.
+#
+# `Type=oneshot` : le script balaie, envoie, et rend la main. Il n'y a rien à
+# maintenir en vie entre deux passages — c'est tout l'intérêt d'une minuterie
+# plutôt que d'un démon qui dormirait quinze minutes.
+
+[Unit]
+Description=PokeBroc — balayage de fond et alertes Telegram
+Documentation=https://github.com/djellatine/PokeBroc
+
+[Service]
+Type=oneshot
+User=pokebroc
+Group=pokebroc
+WorkingDirectory=/srv/pokebroc
+
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/npm run veille -- --quiet
+
+# Un balayage de vingt cartes prend ~50 s, mesuré. Trois minutes laissent de la
+# marge à une place de marché lente, et coupent net une collecte qui aurait
+# trouvé le moyen de ne jamais finir — sans quoi deux passages finiraient par se
+# chevaucher.
+TimeoutStartSec=3min
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/pokebroc/.data

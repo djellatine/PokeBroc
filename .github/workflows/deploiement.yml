@@ -1,0 +1,128 @@
+# Pousser sur `main` met en production — mais seulement si tout passe.
+#
+# Deux tâches, et l'ordre entre elles est tout l'intérêt du fichier : `verifier`
+# rejoue la suite complète que `.claude/skills/livrer/SKILL.md` impose avant un
+# commit, et `deployer` ne démarre que si elle est verte. Le dépôt travaille
+# directement sur `main`, sans branche ni relecture : cette barrière est la
+# seule qui reste entre une faute de frappe et le site en ligne.
+#
+# `npm run build` n'est pas redondant avec `tsc` : c'est le seul à voir un
+# module serveur entraîné dans le paquet client — un `import` de valeur depuis
+# `lib/feed.ts` tire `node:fs/promises` dans le navigateur, et ni le typage ni
+# le linter ne le signalent.
+#
+# Secrets attendus (Settings → Secrets and variables → Actions) :
+#
+#   SSH_HOTE       adresse du VPS
+#   SSH_CLE_PRIVEE clé privée de déploiement, sans phrase de passe
+#   SSH_HOTE_CLE   ligne known_hosts du serveur, obtenue par
+#                  `ssh-keyscan -t ed25519 <hote>`
+#
+# `SSH_HOTE_CLE` plutôt qu'un `ssh-keyscan` fait ici : scanner à chaque
+# déploiement, c'est faire confiance à qui répond ce jour-là. Cette clé pilote
+# un serveur, elle mérite d'être épinglée.
+
+name: Déploiement
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Deux poussées rapprochées ne doivent pas se déployer en parallèle : la seconde
+# attend. `cancel-in-progress: false` parce qu'un déploiement interrompu en
+# pleine construction laisserait le serveur entre deux versions.
+concurrency:
+  group: deploiement
+  cancel-in-progress: false
+
+jobs:
+  verifier:
+    name: Vérifier
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund
+
+      - name: Tests
+        run: npm test
+
+      - name: Typage
+        run: npx tsc --noEmit
+
+      - name: Linter
+        run: npm run lint
+
+      # Sans `.env.local`, le plan de site retombe sur localhost et eBay se tait :
+      # c'est sans importance ici, on ne vérifie que la compilation.
+      - name: Construction
+        run: npm run build
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Tests du collecteur leboncoin
+        run: python collect/test_lbc.py
+
+  deployer:
+    name: Mettre en ligne
+    needs: verifier
+    runs-on: ubuntu-latest
+    # `workflow_dispatch` sur une autre branche construirait sans déployer :
+    # le serveur suit `origin/main`, il n'a rien à faire d'autre chose.
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Tant qu'aucun serveur n'est configuré, cette tâche s'arrête ici en vert
+      # plutôt que d'échouer. Un workflow rouge en permanence cesse d'être lu, et
+      # c'est précisément celui qu'on veut regarder le jour où il casse
+      # vraiment. La garde est au niveau de l'étape parce que le contexte
+      # `secrets` n'est pas lisible depuis un `if:` de tâche.
+      - name: Un serveur est-il configuré ?
+        id: garde
+        env:
+          HOTE: ${{ secrets.SSH_HOTE }}
+        run: |
+          if [ -z "$HOTE" ]; then
+            echo "pret=false" >> "$GITHUB_OUTPUT"
+            echo "ℹ️ \`SSH_HOTE\` n'est pas défini : aucun serveur à déployer." \
+              >> "$GITHUB_STEP_SUMMARY"
+            echo "Voir la section « Mise en ligne » du README." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "pret=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Préparer SSH
+        if: steps.garde.outputs.pret == 'true'
+        env:
+          CLE: ${{ secrets.SSH_CLE_PRIVEE }}
+          HOTE_CLE: ${{ secrets.SSH_HOTE_CLE }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$CLE" > ~/.ssh/deploiement
+          chmod 600 ~/.ssh/deploiement
+          printf '%s\n' "$HOTE_CLE" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      # Le script arrive par le tuyau : c'est la version du commit qu'on déploie
+      # qui s'exécute, pas une copie vieillie sur le serveur. `bash -s` lit
+      # l'entrée standard, et `-T` évite un pseudo-terminal dont on n'a que faire.
+      - name: Déployer
+        if: steps.garde.outputs.pret == 'true'
+        run: |
+          ssh -T -i ~/.ssh/deploiement \
+              -o BatchMode=yes -o StrictHostKeyChecking=yes \
+              "pokebroc@${{ secrets.SSH_HOTE }}" 'bash -s' < deploy/deployer.sh
+
+      - name: Effacer la clé
+        if: always()
+        run: rm -f ~/.ssh/deploiement

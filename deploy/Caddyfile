@@ -1,0 +1,25 @@
+# Reverse proxy et HTTPS. `deploy/installer.sh` remplace DOMAINE par le vôtre
+# et dépose ce fichier dans /etc/caddy/Caddyfile.
+#
+# Caddy plutôt que Nginx pour une seule raison, mais elle est décisive ici : il
+# obtient et renouvelle seul son certificat Let's Encrypt, sans certbot, sans
+# minuterie de renouvellement, sans rien à surveiller. Le HTTPS n'est pas une
+# option sur ce site — `lib/auth.ts` pose le cookie de session avec `secure`
+# en production, et aucun navigateur ne le renverrait en clair.
+
+DOMAINE {
+	encode zstd gzip
+
+	# Caddy pose `X-Forwarded-For` de lui-même, ce dont `clientIp()` a besoin :
+	# sans lui, la limitation de débit compterait toutes les requêtes du site
+	# sur l'adresse du proxy, c'est-à-dire 127.0.0.1, et plafonnerait tout le
+	# monde ensemble au premier visiteur actif.
+	reverse_proxy 127.0.0.1:3000
+
+	log {
+		output file /var/log/caddy/pokebroc.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+	}
+}

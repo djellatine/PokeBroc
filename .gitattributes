@@ -1,0 +1,16 @@
+# Le dépôt se développe sous Windows et se déploie sous Linux. Les fichiers
+# ci-dessous sont lus par Linux et n'admettent pas les fins de ligne Windows :
+#
+# - un `\r` en fin de ligne shebang donne « bad interpreter: /usr/bin/env
+#   bash^M », erreur dont le message ne montre justement pas le caractère fautif ;
+# - systemd refuse une unité en CRLF ;
+# - `curl_cffi` s'en moque, mais `collect/lbc.py` est lancé par systemd.
+#
+# `eol=lf` fixe la fin de ligne dans la copie de travail, pas seulement dans le
+# dépôt : sans cela, un fichier créé sous Windows part en CRLF si le poste n'a
+# pas `core.autocrlf`.
+
+*.sh text eol=lf
+*.py text eol=lf
+deploy/** text eol=lf
+.github/workflows/*.yml text eol=lf

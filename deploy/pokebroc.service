@@ -1,0 +1,46 @@
+# Le site lui-même.
+#
+# `Restart=always` plutôt qu'une surveillance externe : le processus est unique
+# et détient tout l'état en mémoire — sessions mises à part, qui sont signées et
+# survivent — donc le redémarrer est la seule réparation qui vaille, et elle
+# doit être automatique.
+#
+# Le durcissement n'est pas décoratif : ce service lit `.data/users.json`, qui
+# contient les empreintes de mots de passe de tout le monde. `ProtectSystem=strict`
+# rend le reste du disque inaccessible en écriture, et `ReadWritePaths` énumère
+# les deux seuls dossiers où il a quelque chose à écrire.
+
+[Unit]
+Description=PokeBroc — site Next.js
+Documentation=https://github.com/djellatine/PokeBroc
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pokebroc
+Group=pokebroc
+WorkingDirectory=/srv/pokebroc
+
+# `next start` lit `.env.local` lui-même : rien à charger ici. NODE_ENV décide
+# en revanche du drapeau `secure` du cookie de session (voir `lib/auth.ts`),
+# et doit donc valoir `production` — sans HTTPS derrière, personne ne pourrait
+# se connecter.
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/npm run start
+
+Restart=always
+RestartSec=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+# `.next` en écriture : `next start` y tient le cache d'images et de requêtes.
+ReadWritePaths=/srv/pokebroc/.data /srv/pokebroc/.next
+
+[Install]
+WantedBy=multi-user.target

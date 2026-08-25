@@ -1,0 +1,34 @@
+# Un passage du collecteur leboncoin. Déclenché par `pokebroc-lbc.timer`.
+#
+# Le seul service à ne pas être en Node : `curl_cffi` rejoue l'empreinte TLS de
+# Chrome, là où le `fetch` de Node se fait refuser par Datadome. Voir l'en-tête
+# de `collect/lbc.py`.
+#
+# Facultatif : si Datadome bloque depuis cette IP, le script sort en erreur, le
+# site perd simplement leboncoin de son flux de lots, et rien d'autre ne bouge.
+# `lib/lbc.ts` refuse d'ailleurs un instantané de plus de six heures plutôt que
+# de présenter comme « récent » un fichier oublié.
+
+[Unit]
+Description=PokeBroc — collecteur leboncoin
+Documentation=https://github.com/djellatine/PokeBroc
+
+[Service]
+Type=oneshot
+User=pokebroc
+Group=pokebroc
+WorkingDirectory=/srv/pokebroc
+
+# L'environnement virtuel est créé par `deploy/installer.sh` : `curl_cffi` est
+# une extension compilée, que la distribution ne fournit pas.
+ExecStart=/srv/pokebroc/.venv/bin/python collect/lbc.py --quiet
+
+# Neuf requêtes espacées de 2 s, plus les réessais : deux minutes couvrent
+# largement, et bornent un passage que Datadome ferait traîner.
+TimeoutStartSec=2min
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/pokebroc/.data

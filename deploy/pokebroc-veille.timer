@@ -1,0 +1,22 @@
+# Un quart d'heure : assez court pour qu'une annonce fraîche arrive tant qu'elle
+# est encore disponible, assez long pour qu'un balayage (~50 s sur vingt cartes)
+# soit fini bien avant le suivant.
+#
+# `OnCalendar` plutôt que `OnUnitActiveSec` : `Persistent=true` ne s'applique
+# qu'aux minuteries de calendrier. C'est lui qui rattrape le passage manqué
+# pendant un redémarrage ou une coupure — l'équivalent exact de
+# `StartWhenAvailable` sous le planificateur Windows.
+
+[Unit]
+Description=PokeBroc — veille toutes les 15 minutes
+Documentation=https://github.com/djellatine/PokeBroc
+
+[Timer]
+OnCalendar=*:0/15
+Persistent=true
+# Sans cela systemd s'autorise jusqu'à une minute de dérive pour regrouper les
+# réveils. Trente secondes suffisent à garder la cadence lisible dans le journal.
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

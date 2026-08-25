@@ -554,6 +554,150 @@ Node 24 exécute le TypeScript nativement mais applique la résolution ESM stric
 imports sans extension. `tests/resolve-ts.mjs` ajoute ce chaînon manquant avec `module.registerHooks`,
 plutôt que de réécrire tout `lib/` pour satisfaire le lanceur de tests.
 
+## Mise en ligne
+
+Trois contraintes décident de la forme, et elles sont toutes mesurées plus haut :
+
+- `.data/` vit sur le disque, et deux mécanismes supposent **un seul processus** — le verrou
+  `serialize` de `lib/json-file.ts` et le seau à jetons de `lib/rate-limit.ts`. Vercel, Netlify et
+  Cloudflare Pages sont donc exclus, non par préférence mais par incompatibilité.
+- Deux minuteries doivent tourner à côté du site : la veille (15 min) et le collecteur leboncoin
+  (3 h). Il faut une machine, pas une fonction.
+- Le HTTPS n'est pas facultatif : `lib/auth.ts` pose le cookie de session avec `secure` en
+  production, et aucun navigateur ne le renverrait en clair. Sans certificat, personne ne peut se
+  connecter — pas même vous.
+
+D'où un VPS et rien de plus exotique. `deploy/` contient tout : sept unités systemd, un Caddyfile,
+un installateur et un script de déploiement.
+
+### Ce qui tourne sur le serveur
+
+| Unité | Cadence | Rôle |
+| --- | --- | --- |
+| `pokebroc.service` | permanent | `next start` sur le port 3000, redémarré s'il tombe |
+| `pokebroc-veille.timer` | `*:0/15` | balayage de fond + alertes Telegram |
+| `pokebroc-lbc.timer` | `0/3:05` | collecteur leboncoin |
+| `pokebroc-sauvegarde.timer` | 4 h du matin | archive `.data/`, 14 jours glissants |
+| `caddy` | permanent | HTTPS Let's Encrypt, reverse proxy vers 3000 |
+
+Les minuteries emploient `OnCalendar` et non `OnUnitActiveSec` : `Persistent=true` ne s'applique
+qu'aux minuteries de calendrier, et c'est lui qui rattrape un passage manqué pendant un
+redémarrage. C'est l'équivalent exact de `StartWhenAvailable` sous le planificateur Windows.
+
+Le collecteur leboncoin est décalé de cinq minutes sur l'heure ronde, là où la veille tombe sur les
+quarts : sans cela les deux se déclencheraient ensemble quatre fois par jour et se disputeraient le
+processeur pour rien.
+
+### Installer, une fois
+
+Un VPS Debian 12 ou Ubuntu 24.04, 2 vCPU et 4 Go — la construction Next est le seul moment
+gourmand. Le disque n'est pas un sujet : `.data/` pèse 24 Mo, dont 23 de cache d'images plafonné à
+300 Mo et reconstructible.
+
+```bash
+ssh root@votre-vps
+git clone https://github.com/djellatine/PokeBroc.git /tmp/pokebroc
+bash /tmp/pokebroc/deploy/installer.sh votre-domaine.fr
+```
+
+L'installateur est idempotent : le relancer ne touche ni `.data/` ni `.env.local`. Il termine en
+rappelant les trois choses qu'il ne peut pas faire à votre place — l'enregistrement DNS, les
+secrets, et la clé publique de déploiement.
+
+### Le domaine
+
+Un enregistrement `A` vers l'IP du serveur suffit. Caddy demande son certificat dans la minute qui
+suit, puis le renouvelle seul — c'est la raison de le préférer à Nginx ici, où l'on ne veut ni
+certbot ni minuterie de renouvellement à surveiller.
+
+### Pousser met en production
+
+`.github/workflows/deploiement.yml` enchaîne deux tâches, et l'ordre est tout l'intérêt du fichier :
+
+1. **Vérifier** — `npm test`, `tsc --noEmit`, `npm run lint`, `npm run build`, puis
+   `python collect/test_lbc.py`. La même suite que la skill `livrer` impose avant un commit.
+2. **Mettre en ligne** — seulement si la première est verte. Le dépôt travaille directement sur
+   `main`, sans branche ni relecture : cette barrière est la seule qui reste entre une faute de
+   frappe et le site en ligne.
+
+Le déploiement lui-même (`deploy/deployer.sh`) part par le tuyau SSH plutôt que d'être lu sur le
+serveur : c'est donc toujours la version du commit déployé qui s'exécute. Il récupère `origin/main`,
+réinstalle les dépendances npm **et** Python, reconstruit, redémarre — puis **vérifie que le site
+répond**. S'il ne répond pas dans les trente secondes, il revient à la version précédente,
+reconstruit et redémarre à nouveau. Sans ce filet, « pousser met en prod » voudrait aussi dire
+« pousser une régression met le site par terre » : la CI a beau tout vérifier, elle ne construit pas
+avec le `.env.local` du serveur et ne peut donc pas voir une variable manquante.
+
+`.data/` et `.env.local` ne sont jamais touchés — ils sont ignorés par git, donc `git reset --hard`
+les laisse en place. C'est ce qui autorise le déploiement à être brutal sur tout le reste.
+
+Trois secrets à déposer dans **Settings → Secrets and variables → Actions** :
+
+| Secret | Contenu |
+| --- | --- |
+| `SSH_HOTE` | adresse du VPS |
+| `SSH_CLE_PRIVEE` | clé de déploiement, sans phrase de passe |
+| `SSH_HOTE_CLE` | sortie de `ssh-keyscan -t ed25519 <hôte>` |
+
+La clé d'hôte est épinglée plutôt que scannée à chaque passage : scanner, c'est faire confiance à
+qui répond ce jour-là, et cette clé pilote un serveur.
+
+```bash
+# Sur votre poste, une fois :
+ssh-keygen -t ed25519 -f deploiement -N "" -C "github-actions"
+ssh-copy-id -i deploiement.pub pokebroc@votre-vps   # ou coller dans authorized_keys
+ssh-keyscan -t ed25519 votre-vps                    # → SSH_HOTE_CLE
+cat deploiement                                     # → SSH_CLE_PRIVEE
+```
+
+### Surveiller
+
+```bash
+systemctl status pokebroc
+systemctl list-timers 'pokebroc*'
+journalctl -u pokebroc -n 50 --no-pager
+journalctl -u pokebroc-veille.service --since today
+tail -n 20 /srv/pokebroc/.data/veille/collect.log
+tail -n 20 /srv/pokebroc/.data/lbc/collect.log
+```
+
+Les deux collecteurs tiennent leur propre journal en plus de celui de systemd, et pour la même
+raison : un code de sortie ne dit pas *ce qui* a échoué.
+
+### Ce que leboncoin va donner, et ce qu'on n'en sait pas
+
+Le sondage du 5 août 2026 a mesuré, depuis un runner GitHub américain : six pages abouties, 210
+résultats, puis escalade de Datadome. Vinted, lui, rendait ses 48 annonces sur 960 exactement comme
+depuis une ligne de particulier — la veille tournera donc sans histoire.
+
+Ce qui reste inconnu, et que cette mise en ligne va justement trancher : le runner était
+**américain** pour un site franco-français. Le pays et le centre de données avaient changé ensemble,
+et rien ne disait lequel des deux pesait. Un VPS français peut très bien passer.
+
+En cas d'échec, il n'y a rien à réparer dans l'urgence : `lib/lbc.ts` refuse un instantané de plus
+de six heures, la source disparaît du flux des lots, et le reste du site continue. Les deux recours,
+dans l'ordre de ce qu'ils coûtent : allonger `THROTTLE_S` dans `collect/lbc.py` — personne n'a
+mesuré si ralentir suffit à tenir dans le budget d'une IP d'hébergeur — puis, seulement si cela ne
+suffit pas, déporter le seul collecteur sur une machine à IP résidentielle qui pousserait son
+instantané vers le serveur.
+
+### Sauvegardes
+
+`deploy/sauvegarde.sh` archive `.data/` chaque nuit dans `/var/backups/pokebroc`, quatorze jours
+glissants, `img-cache/` exclu — c'est 23 des 24 Mo, et chaque fichier se retélécharge depuis TCGdex.
+
+Cette sauvegarde protège d'une bêtise, pas de la perte du serveur : elle vit sur le même disque.
+Pour cela, activez les instantanés de votre hébergeur — c'est une case à cocher chez les trois.
+
+Restaurer :
+
+```bash
+systemctl stop pokebroc
+tar -xzf /var/backups/pokebroc/data-AAAA-MM-JJ_HHMM.tar.gz -C /srv/pokebroc
+chown -R pokebroc:pokebroc /srv/pokebroc/.data
+systemctl start pokebroc
+```
+
 ## Structure
 
 ```
@@ -610,6 +754,12 @@ collect/
   lbc.py                    collecteur leboncoin — hors du site, sur minuterie
   test_lbc.py               ses tests, sans réseau
   veille.ts                 balayage de fond + alertes — hors du site, sur minuterie
+deploy/
+  installer.sh              provisionnement d'un VPS neuf, une seule fois
+  deployer.sh               ce que la CI lance sur le serveur, avec retour arrière
+  sauvegarde.sh             archive .data/ chaque nuit, 14 jours glissants
+  Caddyfile                 reverse proxy et HTTPS automatique
+  pokebroc*.service/.timer  le site et ses trois minuteries
 tests/                      node:test — match, rate-limit, sightings, format, alertes
 ```
 
