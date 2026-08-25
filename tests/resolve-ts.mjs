@@ -4,8 +4,11 @@
  * Node 24 exécute le TypeScript nativement, mais applique la résolution ESM
  * stricte : `import "./tcgdex"` échoue là où `tsc` et Next acceptent. Réécrire
  * tout `lib/` en `./tcgdex.ts` pour satisfaire le lanceur de tests aurait été
- * la queue qui remue le chien ; ce crochet de vingt lignes coûte moins cher, et
- * ne pèse que sur les tests.
+ * la queue qui remue le chien ; ce crochet de vingt lignes coûte moins cher.
+ *
+ * Chargé par les deux entrées qui exécutent `lib/` hors de Next : la suite de
+ * tests (`npm test`) et la veille (`npm run veille`). Il reste dans `tests/`
+ * parce que c'est là qu'il est né ; rien n'y est spécifique aux tests.
  *
  * `module.registerHooks` est intégré à Node — la suite reste sans dépendance.
  */

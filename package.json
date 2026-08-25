@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./tests/resolve-ts.mjs --test \"tests/*.test.ts\""
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./tests/resolve-ts.mjs --test \"tests/*.test.ts\"",
+    "veille": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local --import ./tests/resolve-ts.mjs collect/veille.ts"
   },
   "dependencies": {
     "next": "16.2.12",

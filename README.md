@@ -240,6 +240,61 @@ La médiane plutôt que la moyenne : une gradée à 900 € déplacerait une moy
 Seules les correspondances fortes entrent dans ces statistiques. Les annonces de plus de 120 jours
 sont oubliées, et un plafond de 1500 entrées par carte borne la taille des fichiers.
 
+## Les alertes arrivent sans qu'on regarde
+
+Le fil ne se collectait que sous les yeux d'un visiteur : `refreshCard()` n'était appelé que depuis
+un rendu de page ou `/api/feed`. Personne sur le site, aucune collecte ; aucune collecte, rien à
+annoncer. Une notification qui ne se déclenche que devant l'écran ne notifie rien.
+
+`collect/veille.ts` est le second processus qui manquait. Sur minuterie — le même patron que le
+collecteur leboncoin — il balaie l'union des cartes suivies, relève la boîte de réception du bot,
+et envoie sur Telegram ce qui vient d'apparaître. Deux effets, dont le second était déjà souhaitable
+avant qu'il soit question d'alertes :
+
+- les annonces neuves sont découvertes dans les minutes qui suivent leur mise en ligne ;
+- le badge « nouveau » redevient honnête pour qui ne vient qu'une fois par jour — sans veille, il ne
+  montrait que ce que la visite venait elle-même de déterrer.
+
+### Pourquoi Telegram
+
+Le Web Push voudrait un service worker, des clés VAPID et surtout du HTTPS, que ce site n'a pas.
+L'e-mail partirait d'une IP résidentielle, donc en indésirables, à moins de louer un relais —
+c'est-à-dire d'ajouter le service tiers évité partout ailleurs. Telegram n'attend qu'un POST
+sortant : ni certificat, ni port ouvert, ni dépendance ajoutée. Le site en compte toujours trois
+(`next`, `react`, `react-dom`).
+
+Aucun webhook non plus : c'est la veille qui va chercher les messages (`getUpdates`), au rythme de
+son balayage. Un webhook exigerait une adresse publique, ce qui ferait rentrer le problème du HTTPS
+par la fenêtre.
+
+### Ce qui déclenche une alerte
+
+Exactement ce que le fil montre par défaut : correspondance forte (le titre cite le nom **et** le
+numéro ou l'extension), ni gradée, ni lot. Reprendre les réglages par défaut du tableau de bord
+plutôt qu'en inventer d'autres est la seule façon qu'une alerte ne mène pas à une page où l'annonce
+annoncée est justement filtrée — et un lien qui ne montre rien décrédibilise le suivant.
+
+La règle vit dans `lib/alerts.ts`, pas dans le script : c'est une décision métier, elle se teste sans
+réseau ni Telegram (`tests/alerts.test.ts`).
+
+### Deux processus, un seul écrivain par fichier
+
+`store.ts` sérialise ses écritures **en mémoire**, ce qui ne protège de rien entre deux processus :
+le site et la veille liraient la même version de `users.json`, et la seconde écriture effacerait la
+première — avec la carte que l'utilisateur venait d'épingler.
+
+D'où le partage, calqué sur celui de `collect/lbc.py` : le site possède `users.json`, la veille
+possède `.data/veille/state.json`, et chacun se contente de lire celui de l'autre. C'est ce qui
+explique une bizarrerie apparente de l'interface — **on connecte Telegram depuis le site, mais on
+s'en déconnecte en envoyant `/stop` au bot**. Un bouton « déconnecter » sur la page Alertes devrait
+écrire dans le fichier de l'autre processus, et rouvrirait exactement la course que ce découpage
+évite.
+
+Le repère des alertes est distinct de celui du badge : `feedNewSince` suit les *visites* et recule
+au bouton « Tout marquer comme vu », là où `notifiedAt` n'avance que lorsqu'un message est
+effectivement parti. Les confondre ferait qu'ouvrir la page éteint des alertes jamais envoyées, et
+qu'un retour après trente minutes renvoie celles qui l'avaient déjà été.
+
 ## Comptes, sessions et plafonds
 
 Aucune base de données, aucune dépendance ajoutée :
@@ -363,7 +418,8 @@ npm run lint
 ```
 
 Aucune variable d'environnement n'est nécessaire en développement. `NEXT_PUBLIC_SITE_URL` sert au
-plan de site.
+plan de site, `EBAY_CLIENT_ID` / `EBAY_CLIENT_SECRET` ajoutent eBay au fil, et `TELEGRAM_BOT_TOKEN`
+les alertes. Chacune est facultative : sans elle, la fonction disparaît sans rien casser.
 
 ### Le collecteur leboncoin
 
@@ -426,6 +482,61 @@ Le collecteur reste poli : 2 s entre deux requêtes, empreinte de navigateur tir
 exécution, et arrêt anticipé dès qu'une page sort de la fenêtre — en pratique 9 requêtes par
 passage, soit ~72 par jour.
 
+### La veille et les alertes Telegram
+
+Facultative, comme les clés eBay : sans `TELEGRAM_BOT_TOKEN`, la veille balaie quand même — ce qui
+garde le badge « nouveau » à jour — et n'envoie simplement rien.
+
+```bash
+npm run veille                # balaie, appaire, alerte
+npm run veille -- --dry-run   # n'envoie rien, n'avance aucun repère
+npm run veille -- --no-sweep  # appairage et alertes seuls, sans balayage
+npm run veille -- --quiet     # pas de détail carte par carte
+```
+
+`--dry-run` retient les messages et l'état, pas les instantanés : le balayage écrit `.data/feed/`
+comme d'habitude, puisque c'est justement ce qu'on veut observer. Le combiner avec `--no-sweep` pour
+ne toucher à rien.
+
+**Créer le bot**, une fois : écrire à [@BotFather](https://t.me/BotFather), `/newbot`, choisir un nom
+et un identifiant. Il rend un jeton, à poser dans `.env.local` :
+
+```
+TELEGRAM_BOT_TOKEN=123456789:AAE...
+# Facultatif, cosmétique : fabrique le lien « Ouvrir Telegram » de la page Alertes,
+# qui lance la conversation avec le code déjà saisi.
+TELEGRAM_BOT_NAME=MonPokeBrocBot
+```
+
+**Connecter un compte** : page **Alertes** du site → « Obtenir un code » → envoyer ce code au bot.
+La liaison s'établit au passage suivant de la veille (le code vaut 15 minutes). `/stop` dans la
+conversation délie — voir plus haut pourquoi la déconnexion ne se fait pas depuis le site.
+
+**La minuterie**, un quart d'heure convenant bien : c'est assez court pour qu'une annonce fraîche
+arrive tant qu'elle est disponible, et assez long pour qu'un balayage de vingt cartes (≈ 50 s,
+mesuré) soit terminé avant le suivant.
+
+```powershell
+$node = (Get-Command node).Source
+$action  = New-ScheduledTaskAction -Execute $node `
+             -Argument "--disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local --import ./tests/resolve-ts.mjs collect/veille.ts --quiet" `
+             -WorkingDirectory "$PWD"
+$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) `
+             -RepetitionInterval (New-TimeSpan -Minutes 15)
+$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries
+Register-ScheduledTask -TaskName PokeBroc-Veille -Action $action -Trigger $trigger `
+                       -Settings $settings -Force
+```
+
+Pour la retirer : `Unregister-ScheduledTask -TaskName PokeBroc-Veille -Confirm:$false`.
+
+Le script tient son journal dans `.data/veille/collect.log`, pour la même raison que le collecteur
+leboncoin : sous une minuterie, un code de sortie seul ne dit pas *ce qui* a échoué.
+
+```powershell
+Get-Content .data\veille\collect.log -Encoding UTF8 -Tail 20
+```
+
 ### Tests
 
 `lib/match.ts` décide qu'une annonce parle bien de *cette* carte : c'est là que se joue la valeur du
@@ -455,6 +566,8 @@ app/
   carte/[id]/page.tsx       fiche carte + cote + prix observés + recherche libre
   actions/auth.ts           inscription, connexion, déconnexion, plafonds
   actions/favorites.ts      ajout / retrait, « tout marquer comme vu »
+  actions/telegram.ts       émission et annulation du code d'appairage
+  alertes/page.tsx          état de la veille, appairage Telegram
   api/cards/route.ts        proxy TCGdex + préchauffage des visuels
   api/carte-image/route.ts  visuels servis depuis le cache disque
   api/feed/route.ts         rafraîchissement d'une carte du fil
@@ -474,10 +587,11 @@ components/
   PriceHistory.tsx          prix réellement observés sur Vinted
   CardThumb.tsx             visuel de carte, avec réessais et repli sur le nom
   usePersisted.ts           préférences d'affichage (useSyncExternalStore)
+  TelegramLink.tsx          code d'appairage : émission, copie, lien profond
   AccountMenu.tsx, AuthForm.tsx, FavoriteButton.tsx, FocusSearchButton.tsx
 lib/
   auth.ts                   mots de passe, jetons, session
-  store.ts                  comptes, favoris, repère du badge « nouveau »
+  store.ts                  comptes, favoris, badge « nouveau », code Telegram
   feed.ts                   instantanés du fil, collecte, fraîcheur
   lots.ts                   lots : flux récent partagé + lots par carte suivie
   sightings.ts              annonces déjà vues, statistiques de prix
@@ -489,10 +603,14 @@ lib/
   lbc.ts                    lecture des lots leboncoin (aucune requête : voir collect/)
   match.ts                  notation des annonces, état, requêtes
   format.ts                 euros, pourcentages, ancienneté
+  alerts.ts                 ce qu'une alerte retient, et comment elle se lit
+  telegram.ts               bot Telegram : envoi, réception, échappement
+  veille.ts                 état de la veille (appairages, repère des alertes)
 collect/
   lbc.py                    collecteur leboncoin — hors du site, sur minuterie
   test_lbc.py               ses tests, sans réseau
-tests/                      node:test — match, rate-limit, sightings, format
+  veille.ts                 balayage de fond + alertes — hors du site, sur minuterie
+tests/                      node:test — match, rate-limit, sightings, format, alertes
 ```
 
 ## Limites connues
@@ -525,13 +643,26 @@ tests/                      node:test — match, rate-limit, sightings, format
   fait : sur leboncoin cette requête rend surtout des peluches, des jouets et des vêtements. Le
   catalogue de Vinted, déjà celui d'une brocante de mode, restait exploitable ; celui de leboncoin
   ne l'est pas.
+- Le filtre « annonces en français » ne s'applique pas aux alertes : c'est une préférence de
+  navigateur (`localStorage`), que la veille — qui tourne sans navigateur — ne peut pas lire. Une
+  alerte peut donc porter sur une annonce eBay étrangère que le fil vous masquerait.
+- La veille et le site écrivent tous deux `.data/feed/` et `.data/sightings/`. La concurrence y est
+  bénigne — les écritures sont atomiques, donc jamais tronquées — mais deux passages simultanés sur
+  la même carte peuvent faire perdre le second instantané. Au pire, une annonce est redécouverte au
+  tour suivant.
+- Une alerte part au plus tôt au passage suivant de la veille : à un quart d'heure de minuterie,
+  c'est le délai entre la mise en ligne et la notification.
+- Telegram suppose un compte Telegram. C'est le prix du canal — voir plus haut ce que coûtaient les
+  deux autres.
 - Leboncoin ne publie ni compteur de favoris ni prix total en recherche : le nombre de favoris vaut
   toujours zéro, et les frais de port n'apparaissent pas — le mode de remise se choisit à l'achat.
 
 ## Suite possible
 
-Alertes par e-mail sous un prix cible, autres jeux (Yu-Gi-Oh!, One Piece), et un rafraîchisseur en
-tâche de fond qui balaierait l'union des cartes suivies sans attendre qu'un visiteur passe.
+Un seuil par carte au-dessus des alertes — « Dracaufeu sous 40 € » — plutôt que la règle unique
+d'aujourd'hui, qui signale toute annonce neuve dès lors qu'elle est bien celle de la carte. La
+notation et le repère existent ; il n'y manque qu'un champ dans `FavoriteCard` et un test de plus
+dans `selectFresh`. Puis d'autres jeux (Yu-Gi-Oh!, One Piece).
 
 Côté lots, le filtre « ne montrer que les lots contenant telle carte » est la suite naturelle : la
 notation existe déjà (`scoreLot`, `lotQueries`), il ne lui manque qu'un sélecteur au-dessus de la

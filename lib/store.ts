@@ -13,7 +13,7 @@
  * mémoire, pas verrouillées sur le disque).
  */
 
-import { randomUUID } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 import { stat } from "node:fs/promises";
 import path from "node:path";
 import { DATA_DIR, readJson, serialize, writeJson } from "./json-file";
@@ -41,6 +41,14 @@ export interface User {
   feedSeenAt?: number;
   /** Repère du badge « nouveau » : les annonces vues après ne l'étaient pas. */
   feedNewSince?: number;
+  /**
+   * Code d'appairage Telegram en attente, à envoyer au bot. Voir
+   * `startTelegramLink()` — le lien lui-même vit dans `.data/veille/state.json`,
+   * que la veille est seule à écrire.
+   */
+  telegramCode?: string;
+  /** Émission du code, en ms epoch. Passé le délai, le code ne vaut plus rien. */
+  telegramCodeAt?: number;
 }
 
 interface Database {
@@ -233,6 +241,90 @@ export async function markFeedSeen(userId: string, now = Date.now()): Promise<vo
       user.feedSeenAt = now;
     }
   });
+}
+
+/* ------------------------------------------------- appairage Telegram */
+
+/**
+ * Durée de validité d'un code d'appairage.
+ *
+ * Un code sans péremption reste indéfiniment une clé : qui le lit par-dessus
+ * une épaule peut brancher *sa* conversation Telegram sur le compte d'un autre,
+ * des semaines plus tard. Un quart d'heure suffit largement à ouvrir Telegram
+ * et à coller six caractères.
+ */
+export const TELEGRAM_CODE_TTL_MS = 15 * 60 * 1000;
+
+/** Sans I, O, 0 ni 1 : le code se lit sur un écran et se retape à la main. */
+const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const CODE_LENGTH = 6;
+
+/**
+ * Émet un code d'appairage et le renvoie.
+ *
+ * `randomInt` plutôt que `Math.random` : ce code autorise l'accès aux alertes
+ * d'un compte le temps de sa validité, et un générateur prévisible se devine.
+ *
+ * L'appairage lui-même n'est pas écrit ici : il vit dans `.data/veille/`, que
+ * la veille est seule à écrire — voir l'en-tête de `lib/veille.ts`.
+ */
+export async function startTelegramLink(userId: string): Promise<string | null> {
+  const code = Array.from(
+    { length: CODE_LENGTH },
+    () => CODE_ALPHABET[randomInt(CODE_ALPHABET.length)],
+  ).join("");
+
+  return transaction((db) => {
+    const user = db.users.find((entry) => entry.id === userId);
+    if (!user) return null;
+    user.telegramCode = code;
+    user.telegramCodeAt = Date.now();
+    return code;
+  });
+}
+
+/** Retire le code en attente : appairage abouti, ou renoncement. */
+export async function clearTelegramCode(userId: string): Promise<void> {
+  await transaction((db) => {
+    const user = db.users.find((entry) => entry.id === userId);
+    if (user) {
+      delete user.telegramCode;
+      delete user.telegramCodeAt;
+    }
+  });
+}
+
+/**
+ * Compte portant ce code, s'il est encore valide.
+ *
+ * La comparaison est insensible à la casse et aux espaces : le code arrive
+ * recopié à la main depuis un téléphone, souvent avec une majuscule
+ * automatique ou une espace collée par le presse-papier.
+ */
+export async function findUserByTelegramCode(
+  code: string,
+  now = Date.now(),
+): Promise<User | null> {
+  const needle = code.trim().toUpperCase();
+  if (needle.length !== CODE_LENGTH) return null;
+
+  const db = await read();
+  const user = db.users.find(
+    (entry) =>
+      entry.telegramCode === needle && now - (entry.telegramCodeAt ?? 0) < TELEGRAM_CODE_TTL_MS,
+  );
+  return user ? clone(user) : null;
+}
+
+/**
+ * Tous les comptes.
+ *
+ * Pour la veille, qui notifie compte par compte : `allTrackedCards()` fond les
+ * collections en une seule liste, ce qui convient pour balayer mais pas pour
+ * savoir *à qui* envoyer quoi.
+ */
+export async function listUsers(): Promise<User[]> {
+  return clone((await read()).users);
 }
 
 /** Vide le cache de lecture. Réservé aux tests. */

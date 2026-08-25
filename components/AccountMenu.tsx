@@ -39,6 +39,16 @@ export default async function AccountMenu() {
       <ModeSwitch />
       <FrenchOnlyFlag />
 
+      {/* Un réglage, pas une troisième marchandise : d'où un lien discret ici
+          plutôt qu'un onglet dans `ModeSwitch`, qui n'oppose que les deux fils. */}
+      <Link
+        href="/alertes"
+        title="Recevoir les annonces neuves de vos cartes sur Telegram"
+        className="rounded-lg px-2 py-1.5 text-dim transition hover:text-text"
+      >
+        Alertes
+      </Link>
+
       <span className="hidden max-w-[18ch] truncate text-faint lg:block" title={user.email}>
         {user.email}
       </span>

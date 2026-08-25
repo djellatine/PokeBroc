@@ -43,13 +43,18 @@ export default function ModeSwitch() {
   // `/carte/pl3-143` et la bascule paraîtrait éteinte.
   const onLots = pathname.startsWith("/lots");
 
+  // La page Alertes n'est ni l'un ni l'autre : c'est un réglage, pas une
+  // marchandise. Sans cette exception, « Mes cartes » s'y allumerait par
+  // défaut et la bascule désignerait une page où l'on n'est pas.
+  const onNeither = pathname.startsWith("/alertes");
+
   return (
     <nav
       aria-label="Cartes ou lots"
       className="flex h-8 shrink-0 items-center gap-0.5 rounded-lg border border-line bg-panel-2 p-0.5"
     >
       {MODES.map((mode) => {
-        const active = mode.href === "/lots" ? onLots : !onLots;
+        const active = onNeither ? false : mode.href === "/lots" ? onLots : !onLots;
         return (
           <Link
             key={mode.href}
