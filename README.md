@@ -115,9 +115,8 @@ Trois différences avec le fil des cartes :
 | Validité de l'instantané | 10 min | 15 min |
 | Écart à la cote | affiché | jamais |
 
-Relevé sur une collecte réelle : 120 lots retenus (43 Vinted, 77 eBay), tous datés, les plus récents
-mis en ligne **une minute plus tôt**, et 74 annonçant une quantité. Leboncoin en apporte une
-cinquantaine de plus par passage.
+Relevé sur une collecte réelle du 29 août 2026 : le plafond de 200 lots atteint, 61 Vinted, 87 eBay
+et 52 leboncoin, tous datés, les plus récents mis en ligne **une minute plus tôt**.
 
 La page se lit en liste ou en **grille**, sous la même préférence que le fil des cartes
 (`components/ViewSwitch.tsx`) : c'est un réglage sur la forme des annonces, pas sur leur contenu, et
@@ -157,6 +156,35 @@ seule la première page (48 annonces) est lue. Mesuré sur `base1-4` :
 
 Le serveur compose donc lui-même la requête la plus discriminante (`lib/match.ts` → `bestQuery`), à
 partir du numéro imprimé que seul il connaît.
+
+### eBay, lui, la lit au pied de la lettre
+
+La même requête envoyée aux deux catalogues n'y est pas comprise de la même façon. `q` est un **ET
+strict** chez eBay : `Dracolosse 2/146` exige que le titre porte `2/146` tel quel, et rend zéro
+sinon. Vinted se contente d'une correspondance partielle — d'où une requête taillée pour lui qui ne
+ramenait rien de l'autre côté, sans que rien ne le signale : l'instantané restait valide, le fil
+restait servi par Vinted, la source manquante ne laissait aucune trace.
+
+Mesuré le 29 août 2026 sur les soixante requêtes réellement utilisées par le fil :
+
+| Requête | eBay avec le dénominateur | sans |
+| --- | --- | --- |
+| `Dracolosse 2/146` | 16 | **545** |
+| `Pikachu 15/17` | 6 | **355** |
+| `Rayquaza 9/106` | 19 | **283** |
+| `Malosse 5/75` | **0** | 165 |
+| `Zoroark 143/86` | **0** | 6 |
+
+Huit requêtes sur soixante ne rendaient **rien** chez eBay quand Vinted en rendait quarante-huit, et
+trente-deux gagnaient à perdre le dénominateur. Le gain n'est pas du bruit : après `scoreAll`, qui
+écarte les annonces hors sujet, un échantillon de douze cartes passe de 167 à 579 annonces gardées,
+dont 164 à 302 correspondances **fortes**.
+
+`looseQuery` (`lib/ebay.ts`) n'ampute donc que le dénominateur — `4/102` devient `4`, `SL6/95`
+devient `SL6`. Le numéro imprimé reste, et c'est lui qui porte le signal. Une requête sans barre
+oblique, celles des lots, ressort intacte. La transformation vit dans `ebay.ts` et non chez
+l'appelant : c'est une propriété du moteur d'eBay, pas du fil, et un futur appelant qui l'ignorerait
+retomberait silencieusement sur des recherches vides.
 
 ### Les noms à symboles, que personne n'écrit
 
@@ -435,15 +463,18 @@ python collect/lbc.py --window 6   # remonter plus loin
 python collect/test_lbc.py         # 18 tests, sans réseau
 ```
 
-Il tourne sur minuterie, jamais à la demande du site. Toutes les trois heures suffit : mesuré, une
-requête produit ~30 mises en ligne par heure, et trois pages en couvrent trois heures. Sous Windows :
+Il tourne sur minuterie, jamais à la demande du site, **au quart d'heure**. La fenêtre reste de trois
+heures — mesuré, une requête produit ~30 mises en ligne par heure et trois pages en couvrent trois
+heures — mais la cadence, elle, est dictée par la péremption : `LBC_MAX_AGE_MS` vaut une heure, et
+une collecte trihoraire laissait donc la source disparaître de la page Lots deux heures sur trois.
+Un seuil de péremption et une minuterie sont un seul réglage en deux fichiers. Sous Windows :
 
 ```powershell
 $py = "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe"
 $action  = New-ScheduledTaskAction -Execute $py `
              -Argument "`"$PWD\collect\lbc.py`" --quiet" -WorkingDirectory "$PWD"
 $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) `
-             -RepetitionInterval (New-TimeSpan -Hours 3)
+             -RepetitionInterval (New-TimeSpan -Minutes 15)
 # StartWhenAvailable rattrape le passage manqué pendant une mise en veille.
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries
 Register-ScheduledTask -TaskName PokeBroc-LBC -Action $action -Trigger $trigger `
@@ -452,14 +483,14 @@ Register-ScheduledTask -TaskName PokeBroc-LBC -Action $action -Trigger $trigger 
 
 Pour la retirer : `Unregister-ScheduledTask -TaskName PokeBroc-LBC -Confirm:$false`.
 
-`lib/lbc.ts` refuse un instantané de plus de six heures — deux passages manqués — plutôt que
+`lib/lbc.ts` refuse un instantané de plus d'une heure — quatre passages manqués — plutôt que
 d'afficher comme « récent » un fichier oublié. Un instantané *vide* reste valide : trois heures sans
 un lot mis en ligne est un résultat, pas une panne, et cela arrive la nuit.
 
 ### Savoir ce qu'a fait un passage
 
-Le script tient un journal dans `.data/lbc/collect.log` (200 dernières lignes, soit ~3 semaines à
-huit passages par jour) :
+Le script tient un journal dans `.data/lbc/collect.log` (200 dernières lignes, soit ~2 jours au
+quart d'heure) :
 
 ```powershell
 Get-Content .data\lbc\collect.log -Encoding UTF8 -Tail 20
@@ -543,6 +574,10 @@ Get-Content .data\veille\collect.log -Encoding UTF8 -Tail 20
 site, et c'est de la logique pure. La suite couvre la notation, les requêtes construites, la
 limitation de débit et les statistiques de prix — aucune dépendance.
 
+`tests/ebay.test.ts` ne couvre qu'une fonction, `looseQuery`, et c'est voulu : le reste de
+`ebay.ts` parle au réseau, mais cette transformation-là décide si la moitié du fil existe. Elle
+n'avait aucun test le jour où la requête a cessé de ramener quoi que ce soit.
+
 `tests/lots.test.ts` mérite une mention, parce que `match.ts` y porte désormais deux règles
 inverses : ce que la notation des cartes pénalise, celle des lots exige. Deux jeux de poids dans le
 même fichier se contredisent vite, et c'est bien arrivé — la pénalité de −8 sur les reproductions,
@@ -561,8 +596,8 @@ Trois contraintes décident de la forme, et elles sont toutes mesurées plus hau
 - `.data/` vit sur le disque, et deux mécanismes supposent **un seul processus** — le verrou
   `serialize` de `lib/json-file.ts` et le seau à jetons de `lib/rate-limit.ts`. Vercel, Netlify et
   Cloudflare Pages sont donc exclus, non par préférence mais par incompatibilité.
-- Deux minuteries doivent tourner à côté du site : la veille (15 min) et le collecteur leboncoin
-  (3 h). Il faut une machine, pas une fonction.
+- Deux minuteries doivent tourner à côté du site, toutes deux au quart d'heure : la veille et le
+  collecteur leboncoin. Il faut une machine, pas une fonction.
 - Le HTTPS n'est pas facultatif : `lib/auth.ts` pose le cookie de session avec `secure` en
   production, et aucun navigateur ne le renverrait en clair. Sans certificat, personne ne peut se
   connecter — pas même vous.
@@ -576,7 +611,7 @@ un installateur et un script de déploiement.
 | --- | --- | --- |
 | `pokebroc.service` | permanent | `next start` sur le port 3000, redémarré s'il tombe |
 | `pokebroc-veille.timer` | `*:0/15` | balayage de fond + alertes Telegram |
-| `pokebroc-lbc.timer` | `0/3:05` | collecteur leboncoin |
+| `pokebroc-lbc.timer` | `*:5/15` | collecteur leboncoin |
 | `pokebroc-sauvegarde.timer` | 4 h du matin | archive `.data/`, 14 jours glissants |
 | `caddy` | permanent | HTTPS Let's Encrypt, reverse proxy vers 3000 |
 
@@ -584,8 +619,8 @@ Les minuteries emploient `OnCalendar` et non `OnUnitActiveSec` : `Persistent=tru
 qu'aux minuteries de calendrier, et c'est lui qui rattrape un passage manqué pendant un
 redémarrage. C'est l'équivalent exact de `StartWhenAvailable` sous le planificateur Windows.
 
-Le collecteur leboncoin est décalé de cinq minutes sur l'heure ronde, là où la veille tombe sur les
-quarts : sans cela les deux se déclencheraient ensemble quatre fois par jour et se disputeraient le
+Le collecteur leboncoin est décalé de cinq minutes sur les quarts, là où la veille tombe pile
+dessus : sans cela les deux se déclencheraient ensemble à chaque passage et se disputeraient le
 processeur pour rien.
 
 ### Installer, une fois
@@ -675,11 +710,16 @@ Ce qui reste inconnu, et que cette mise en ligne va justement trancher : le runn
 et rien ne disait lequel des deux pesait. Un VPS français peut très bien passer.
 
 En cas d'échec, il n'y a rien à réparer dans l'urgence : `lib/lbc.ts` refuse un instantané de plus
-de six heures, la source disparaît du flux des lots, et le reste du site continue. Les deux recours,
-dans l'ordre de ce qu'ils coûtent : allonger `THROTTLE_S` dans `collect/lbc.py` — personne n'a
-mesuré si ralentir suffit à tenir dans le budget d'une IP d'hébergeur — puis, seulement si cela ne
-suffit pas, déporter le seul collecteur sur une machine à IP résidentielle qui pousserait son
-instantané vers le serveur.
+d'une heure, la source disparaît du flux des lots, et le reste du site continue. Les recours, dans
+l'ordre de ce qu'ils coûtent : ramener `DEFAULT_WINDOW_H` de 3 h à 1 h, ce qui fait s'arrêter la
+pagination au bout d'une page ou deux au lieu de trois — au prix d'une présence de leboncoin trois
+fois moindre sur la page Lots ; allonger `THROTTLE_S` — personne n'a mesuré si ralentir suffit à
+tenir dans le budget d'une IP d'hébergeur — puis, seulement si cela ne suffit pas, déporter le seul
+collecteur sur une machine à IP résidentielle qui pousserait son instantané vers le serveur.
+
+Le passage au quart d'heure pèse ici : douze requêtes par passage, soit ~48 par heure contre ~4 du
+temps de la cadence trihoraire. Le budget toléré par Datadome est graduel, et personne ne l'a mesuré
+sur ce régime-là.
 
 ### Sauvegardes
 
@@ -760,7 +800,7 @@ deploy/
   sauvegarde.sh             archive .data/ chaque nuit, 14 jours glissants
   Caddyfile                 reverse proxy et HTTPS automatique
   pokebroc*.service/.timer  le site et ses trois minuteries
-tests/                      node:test — match, rate-limit, sightings, format, alertes
+tests/                      node:test — match, ebay, rate-limit, sightings, format, alertes
 ```
 
 ## Limites connues

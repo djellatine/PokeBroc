@@ -6,7 +6,7 @@
 #
 # Facultatif : si Datadome bloque depuis cette IP, le script sort en erreur, le
 # site perd simplement leboncoin de son flux de lots, et rien d'autre ne bouge.
-# `lib/lbc.ts` refuse d'ailleurs un instantané de plus de six heures plutôt que
+# `lib/lbc.ts` refuse d'ailleurs un instantané de plus d'une heure plutôt que
 # de présenter comme « récent » un fichier oublié.
 
 [Unit]

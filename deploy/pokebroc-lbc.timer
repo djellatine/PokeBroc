@@ -1,16 +1,22 @@
-# Trois heures, comme sous le planificateur Windows : mesuré, une requête produit
-# ~30 mises en ligne par heure et trois pages en couvrent trois heures.
+# Le quart d'heure, parce que c'est ce que `LBC_MAX_AGE_MS` attend.
 #
-# Décalé de cinq minutes sur l'heure ronde, là où la veille tombe sur les
-# quarts : sans cela les deux passages se déclencheraient ensemble quatre fois
-# par jour, et se disputeraient le processeur d'un petit serveur pour rien.
+# La cadence a longtemps été de trois heures, héritée du planificateur Windows.
+# Elle n'a pas suivi quand `lib/lbc.ts` a ramené la péremption de six heures à
+# une : l'instantané passait alors le seuil au bout d'une heure et leboncoin
+# disparaissait de la liste des lots pendant les deux heures suivantes — deux
+# tiers du temps, sans que rien ne le signale. Un seuil de péremption et une
+# minuterie sont un seul réglage en deux fichiers ; les changer ensemble.
+#
+# Décalé de cinq minutes sur les quarts, là où la veille tombe pile dessus :
+# sans cela les deux passages se déclencheraient ensemble et se disputeraient
+# le processeur d'un petit serveur pour rien.
 
 [Unit]
-Description=PokeBroc — collecte leboncoin toutes les 3 heures
+Description=PokeBroc — collecte leboncoin toutes les 15 minutes
 Documentation=https://github.com/djellatine/PokeBroc
 
 [Timer]
-OnCalendar=0/3:05
+OnCalendar=*:5/15
 Persistent=true
 AccuracySec=1min
 

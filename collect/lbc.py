@@ -117,8 +117,10 @@ THROTTLE_S = 2.0
 TIMEOUT_S = 30.0
 MAX_ATTEMPTS = 3
 
-# Lignes conservées dans `collect.log`. À huit passages par jour, cela couvre
-# environ trois semaines — de quoi voir venir une dérive de Datadome.
+# Lignes conservées dans `collect.log`. Au quart d'heure, cela couvre environ
+# deux jours — de quoi voir venir une dérive de Datadome. La valeur tenait
+# trois semaines du temps des huit passages quotidiens ; c'est la cadence qui a
+# changé, pas le besoin, et deux jours de recul suffisent à lire une escalade.
 LOG_LINES = 200
 
 PARIS = ZoneInfo("Europe/Paris")

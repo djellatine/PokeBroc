@@ -325,6 +325,33 @@ function mapItem(raw: RawSummary): EbayItem {
 
 /* ------------------------------------------------------------------ requête */
 
+/**
+ * La même requête, débarrassée du dénominateur de son numéro de carte.
+ *
+ * eBay applique un ET strict sur les mots de `q` : « Dracolosse 2/146 » exige
+ * que le titre porte `2/146` tel quel, et rend zéro sinon. Vinted, pour qui
+ * `bestQuery` a été écrite, se contente d'une correspondance partielle — d'où
+ * une requête qui marche d'un côté et ne ramène rien de l'autre.
+ *
+ * Mesuré le 29 août 2026 sur les soixante requêtes du fil : huit ne rendaient
+ * rien du tout chez eBay quand Vinted en rendait quarante-huit, et trente-deux
+ * gagnaient à perdre le dénominateur. Le gain n'est pas du bruit — après
+ * `scoreAll`, qui écarte les annonces hors sujet, un échantillon de douze
+ * cartes passe de 167 à 579 annonces gardées, dont 164 à 302 correspondances
+ * fortes.
+ *
+ * Seul le dénominateur saute : le numéro imprimé reste, et c'est lui qui porte
+ * le signal. `4/102` devient `4`, `SL6/95` devient `SL6`. Une requête sans
+ * barre oblique — celles des lots, « lot cartes pokemon » — ressort intacte.
+ *
+ * Appliqué dans `searchEbay` plutôt que chez l'appelant : c'est une propriété
+ * du moteur d'eBay, pas du fil. Un futur appelant qui l'ignorerait retomberait
+ * silencieusement sur des recherches vides.
+ */
+export function looseQuery(query: string): string {
+  return query.replace(/\s([^\s/]+)\/[^\s/]+$/, " $1");
+}
+
 function buildUrl(params: EbaySearchParams): string {
   const url = new URL(`${API}/item_summary/search`);
   const perPage = Math.min(200, Math.max(1, params.perPage ?? 50));
@@ -363,7 +390,7 @@ async function call(url: string, token: string, marketplace: string): Promise<Re
 }
 
 export async function searchEbay(params: EbaySearchParams): Promise<EbaySearchResult> {
-  const query = params.query.trim();
+  const query = looseQuery(params.query.trim());
   const perPage = Math.min(200, Math.max(1, params.perPage ?? 50));
   if (!query) {
     return { items: [], total: 0, page: 1, totalPages: 0, perPage };
