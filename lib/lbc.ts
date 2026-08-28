@@ -63,18 +63,26 @@ export interface LbcSnapshot {
 /**
  * Au-delà, l'instantané n'est plus un flux de lots récents.
  *
- * Quatre fois la période de collecte, qui est passée de trois heures à quinze
- * minutes. Quelques passages manqués restent tolérables — la minuterie tombe
- * pendant une mise en veille — mais quatre d'affilée signalent que la collecte
- * ne tourne plus, et il vaut mieux ne rien afficher qu'un « publié il y a 3 h »
- * vieux d'une journée.
+ * Six fois la période de collecte, qui est d'un quart d'heure. Le facteur n'est
+ * pas choisi pour laisser dormir une machine, mais **mesuré sur le taux d'échec
+ * de la collecte elle-même**. Relevé du 25 au 29 août 2026, sur les deux cents
+ * passages du journal : 134 réussis, 66 refusés par Datadome en 403, soit un
+ * tiers d'échec — et des séries allant jusqu'à cinq refus d'affilée.
  *
- * La valeur précédente, six heures, était le double d'une collecte trihoraire.
- * La garder aurait laissé passer pour « récent » un instantané de vingt-quatre
- * passages de retard, là où le reste de la page se rafraîchit tous les quarts
- * d'heure — un seuil de péremption doit suivre la cadence, pas la précéder.
+ * Un seuil d'une heure vaut exactement quatre passages manqués : la série de
+ * cinq du 25 août l'aurait franchi, et celle de quatre du 29 août l'a franchi.
+ * Leboncoin disparaissait donc de la page sans que rien n'ait cessé de tourner.
+ * Une heure et demie couvre six passages, ce qui laisse passer les séries
+ * observées sans jamais présenter comme « récent » un fichier réellement
+ * oublié : au-delà, la collecte ne tourne plus, et mieux vaut ne rien afficher
+ * qu'un « publié il y a 3 h » vieux d'une journée.
+ *
+ * La valeur d'origine, six heures, était le double d'une collecte trihoraire —
+ * vingt-quatre passages de retard une fois la cadence au quart d'heure. Un
+ * seuil de péremption suit la cadence *et* la fiabilité de la source ; ni l'une
+ * ni l'autre seule ne suffit à le poser.
  */
-export const LBC_MAX_AGE_MS = 60 * 60 * 1000;
+export const LBC_MAX_AGE_MS = 90 * 60 * 1000;
 
 export async function readLbcSnapshot(): Promise<LbcSnapshot | null> {
   const snapshot = await readJson<LbcSnapshot>(FILE);

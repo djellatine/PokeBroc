@@ -37,7 +37,16 @@ describe("lbcIsUsable", () => {
     assert.equal(lbcIsUsable(missed, NOW), true);
   });
 
-  it("rejette au-delà de quatre passages manqués", () => {
+  it("accepte la plus longue série de refus observée", () => {
+    // Datadome refuse un passage sur trois, par séries allant jusqu'à cinq.
+    // C'est le cas que le seuil doit absorber : rien n'est en panne, la
+    // collecte reprend au passage suivant, et faire disparaître la source
+    // entre-temps la rendrait absente sans raison lisible.
+    const streak = snapshot({ at: NOW - 5 * 15 * 60_000 });
+    assert.equal(lbcIsUsable(streak, NOW), true);
+  });
+
+  it("rejette au-delà de six passages manqués", () => {
     const abandoned = snapshot({ at: NOW - LBC_MAX_AGE_MS - 1 });
     assert.equal(lbcIsUsable(abandoned, NOW), false);
   });

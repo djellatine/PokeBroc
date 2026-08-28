@@ -7,6 +7,10 @@
 # tiers du temps, sans que rien ne le signale. Un seuil de péremption et une
 # minuterie sont un seul réglage en deux fichiers ; les changer ensemble.
 #
+# Le quart d'heure suppose que la collecte échoue parfois : Datadome en refuse
+# un tiers. C'est `LBC_MAX_AGE_MS`, à une heure et demie, qui absorbe ces
+# séries — pas cette minuterie, qui se contente de réessayer.
+#
 # Décalé de cinq minutes sur les quarts, là où la veille tombe pile dessus :
 # sans cela les deux passages se déclencheraient ensemble et se disputeraient
 # le processeur d'un petit serveur pour rien.

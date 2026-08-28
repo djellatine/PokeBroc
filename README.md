@@ -465,9 +465,9 @@ python collect/test_lbc.py         # 18 tests, sans réseau
 
 Il tourne sur minuterie, jamais à la demande du site, **au quart d'heure**. La fenêtre reste de trois
 heures — mesuré, une requête produit ~30 mises en ligne par heure et trois pages en couvrent trois
-heures — mais la cadence, elle, est dictée par la péremption : `LBC_MAX_AGE_MS` vaut une heure, et
-une collecte trihoraire laissait donc la source disparaître de la page Lots deux heures sur trois.
-Un seuil de péremption et une minuterie sont un seul réglage en deux fichiers. Sous Windows :
+heures — mais la cadence, elle, est dictée par la péremption : une collecte trihoraire laissait la
+source disparaître de la page Lots deux heures sur trois. Un seuil de péremption et une minuterie
+sont un seul réglage en deux fichiers. Sous Windows :
 
 ```powershell
 $py = "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe"
@@ -483,8 +483,9 @@ Register-ScheduledTask -TaskName PokeBroc-LBC -Action $action -Trigger $trigger 
 
 Pour la retirer : `Unregister-ScheduledTask -TaskName PokeBroc-LBC -Confirm:$false`.
 
-`lib/lbc.ts` refuse un instantané de plus d'une heure — quatre passages manqués — plutôt que
-d'afficher comme « récent » un fichier oublié. Un instantané *vide* reste valide : trois heures sans
+`lib/lbc.ts` refuse un instantané de plus d'une heure et demie — six passages manqués — plutôt que
+d'afficher comme « récent » un fichier oublié. Le facteur six n'est pas prudentiel mais **mesuré**,
+sur le taux d'échec de la collecte elle-même : voir la section suivante. Un instantané *vide* reste valide : trois heures sans
 un lot mis en ligne est un résultat, pas une panne, et cela arrive la nuit.
 
 ### Savoir ce qu'a fait un passage
@@ -498,6 +499,24 @@ Get-Content .data\lbc\collect.log -Encoding UTF8 -Tail 20
 
 L'option `-Encoding UTF8` n'est pas décorative : PowerShell 5.1 lit en ANSI par défaut et affiche
 `publiÃ©s` là où le fichier contient bien `publiés`.
+
+Ce journal a servi à poser `LBC_MAX_AGE_MS`. Relevé sur ses deux cents passages, du 25 au 29 août
+2026, **depuis une ligne de particulier** :
+
+| | Passages |
+| --- | --- |
+| Réussis | 134 |
+| Refusés par Datadome (403 à l'amorçage) | 66 |
+| **Taux d'échec** | **33 %** |
+| Plus longue série de refus consécutifs | 5 |
+
+Un refus n'est donc pas un incident : c'est le régime normal, et le passage suivant repart. Ce qui
+compte est la **série**, parce qu'elle seule éloigne l'instantané du présent. Cinq refus d'affilée
+font 1 h 15 sans collecte — au-delà du seuil d'une heure qui a d'abord été posé, d'où sa remontée à
+1 h 30. Sans cela, leboncoin disparaissait de la page Lots alors que rien n'était en panne, et le
+journal était le seul endroit où on pouvait le voir — le planificateur Windows, lui, ne montre qu'un
+`LastTaskResult: 2` indistinguable d'un chemin erroné. C'est la raison d'être de ce journal, et les
+codes de sortie sont détaillés plus bas.
 
 Le journal existe parce que le code de sortie seul est indéchiffrable — Windows publie `2` pour
 « fichier introuvable », valeur que le script emploie aussi pour « bloqué à l'amorçage ». Les codes :
@@ -710,7 +729,7 @@ Ce qui reste inconnu, et que cette mise en ligne va justement trancher : le runn
 et rien ne disait lequel des deux pesait. Un VPS français peut très bien passer.
 
 En cas d'échec, il n'y a rien à réparer dans l'urgence : `lib/lbc.ts` refuse un instantané de plus
-d'une heure, la source disparaît du flux des lots, et le reste du site continue. Les recours, dans
+d'une heure et demie, la source disparaît du flux des lots, et le reste du site continue. Les recours, dans
 l'ordre de ce qu'ils coûtent : ramener `DEFAULT_WINDOW_H` de 3 h à 1 h, ce qui fait s'arrêter la
 pagination au bout d'une page ou deux au lieu de trois — au prix d'une présence de leboncoin trois
 fois moindre sur la page Lots ; allonger `THROTTLE_S` — personne n'a mesuré si ralentir suffit à
