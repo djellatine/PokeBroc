@@ -435,6 +435,42 @@ même quart d'heure et tenant déjà l'union des cartes suivies.
 Relevé sur la première tranche réelle : **7 cartes sur 12 avec au moins une correspondance forte, 29
 au total**, toutes justes.
 
+### « Actualiser » relance aussi leboncoin
+
+Le bouton promet « on regarde maintenant ». Il ne le tenait que pour deux sources sur trois :
+leboncoin n'affichait que ce que la dernière minuterie avait déposé, donc jusqu'à un tour de rotation
+plus tôt. Node ne peut pas interroger leboncoin lui-même — c'est tout le sujet de la section
+précédente — il lance donc le script Python, désigné par `LBC_PYTHON`.
+
+Ce qui rend la chose délicate est le fan-out du bouton : un clic n'émet pas *une* requête mais **une
+par carte suivie**, quarante-huit appels parallèles à `/api/feed`. Lancer le collecteur dans chacun
+ferait quarante-huit amorçages simultanés — précisément la requête que Datadome refuse déjà une fois
+sur trois, et en rafale.
+
+D'où deux garde-fous dans `refreshLbcLive` :
+
+| | Valeur | Pourquoi |
+| --- | --- | --- |
+| Regroupement | 300 ms | le premier appel ouvre un lot, les autres le rejoignent : **un seul amorçage** pour tout le clic |
+| Plafond | 8 cartes | quarante-huit recherches à 2 s feraient plus d'une minute et demie de bouton qui tourne |
+| Délai entre deux lots | 60 s | le délai du bouton se compte *par carte* ; il en fallait un global |
+| Abandon | 35 s | l'instantané précédent vaut mieux qu'une page qui ne répond plus |
+
+Le plafond va aux cartes dont les annonces sont les plus vieilles — une carte jamais collectée passe
+avant toutes les autres, une carte vue il y a dix minutes n'a presque rien à gagner. Les autres se
+contentent de l'instantané, qui a de toute façon moins d'un tour.
+
+La rotation ordinaire n'est pas touchée : `refresh_cards` relit et réécrit son `offset` tel quel,
+pour qu'un clic ne fasse pas sauter son tour à une carte. Mesuré : six cartes rafraîchies en 12,9 s
+pour un seul amorçage, offset inchangé.
+
+Sans `LBC_PYTHON`, rien de tout cela ne se produit et le site se contente de l'instantané — comme il
+tourne sans clés eBay. Sur le serveur, c'est l'interpréteur du `venv` que crée l'installateur :
+
+```
+LBC_PYTHON=/srv/pokebroc/.venv/bin/python
+```
+
 Un défaut est apparu à cette occasion, et il ne concernait pas leboncoin seul. `MAX_PER_CARD` tronque
 le fil à 40 annonces après un tri par score, et `sort` étant stable, les égalités retombaient sur
 l'ordre de collecte : Vinted, eBay, puis leboncoin. La source arrivée en dernier était donc

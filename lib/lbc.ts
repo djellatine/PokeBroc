@@ -20,7 +20,9 @@
  * présenter comme un « flux des lots récents » un fichier vieux d'un jour.
  */
 
+import { execFile } from "node:child_process";
 import path from "node:path";
+import { promisify } from "node:util";
 import { DATA_DIR, readJson, writeJson } from "./json-file";
 import { bestQuery } from "./match";
 import type { FavoriteCard } from "./store";
@@ -263,3 +265,140 @@ export async function readLbcForCard(
  * courante une annonce vieille de deux heures.
  */
 export const LBC_CARD_MAX_AGE_MS = 2 * 60 * 60 * 1000;
+
+/* --------------------------------------------------- collecte à la demande */
+
+/**
+ * Relancer le collecteur depuis le site, sur clic d'« Actualiser ».
+ *
+ * Les deux autres places de marché se réinterrogent à la demande ; leboncoin,
+ * lui, ne montrait que ce que la dernière minuterie avait déposé — jusqu'à une
+ * heure de retard, puisque c'est la durée d'un tour de rotation. Le bouton
+ * promet « on regarde maintenant » ; il tenait cette promesse pour deux
+ * sources sur trois.
+ *
+ * Node ne peut pas interroger leboncoin lui-même : c'est tout le sujet de
+ * l'en-tête de ce module, sa pile TLS se fait refuser. Il lance donc le script
+ * Python, qui a l'empreinte qu'il faut.
+ *
+ * Ce qui rend la chose délicate
+ * -----------------------------
+ * Un clic sur « Actualiser » n'émet pas *une* requête mais **une par carte
+ * suivie** — quarante-huit appels parallèles à `/api/feed`. Lancer le script
+ * dans chacun ferait quarante-huit amorçages simultanés, c'est-à-dire
+ * exactement la requête que Datadome refuse déjà une fois sur trois, en
+ * rafale. D'où le regroupement : le premier appel ouvre un lot, les autres le
+ * rejoignent pendant `BATCH_WINDOW_MS`, et un seul processus part pour tout le
+ * monde — un amorçage, puis une recherche par carte.
+ *
+ * Et d'où le plafond. Quarante-huit recherches à 2 s font plus d'une minute et
+ * demie, pendant laquelle le visiteur regarde un bouton tourner. `LIVE_MAX`
+ * borne le lot ; les cartes en trop se contentent de l'instantané, qui a de
+ * toute façon moins d'un tour. Le tri place en tête celles dont les annonces
+ * sont les plus anciennes, donc celles qui ont le plus à gagner.
+ */
+
+const exec = promisify(execFile);
+
+/**
+ * Interpréteur Python du collecteur. Absent, la collecte à la demande ne se
+ * fait pas et le site retombe sur l'instantané — comme il tourne sans clés
+ * eBay, et sans instantané leboncoin du tout.
+ */
+function python(): string | null {
+  return process.env.LBC_PYTHON?.trim() || null;
+}
+
+export function liveIsConfigured(): boolean {
+  return python() !== null;
+}
+
+/** Fenêtre de regroupement des appels d'un même clic. */
+const BATCH_WINDOW_MS = 300;
+
+/** Cartes recollectées au plus par clic. Au-delà, l'attente prime sur le gain. */
+const LIVE_MAX = 8;
+
+/**
+ * Entre deux lots. Le délai du bouton est de trente secondes et se compte par
+ * carte ; ici il faut un plafond *global*, sans quoi trente-cinq cartes
+ * pourraient déclencher trente-cinq lots à la suite.
+ */
+const LIVE_COOLDOWN_MS = 60_000;
+
+/**
+ * Au-delà, on rend la main au visiteur avec ce qu'on a. Un amorçage contrarié
+ * réessaie trois fois en s'espaçant, ce qui peut durer ; l'instantané précédent
+ * vaut mieux qu'une page qui ne répond plus.
+ */
+const LIVE_TIMEOUT_MS = 35_000;
+
+let batch: { ids: Set<string>; done: Promise<void> } | null = null;
+let lastRun = 0;
+
+async function runCollector(ids: string[]): Promise<void> {
+  const interpreter = python();
+  if (!interpreter) return;
+
+  const script = path.join(process.cwd(), "collect", "lbc.py");
+  await exec(interpreter, [script, "--cards", ids.join(","), "--quiet"], {
+    timeout: LIVE_TIMEOUT_MS,
+    cwd: process.cwd(),
+    windowsHide: true,
+  });
+}
+
+/**
+ * Demande la recollecte de `cardId`, en la groupant avec celles du même clic.
+ *
+ * Ne lève jamais : leboncoin qui ne répond pas ne doit pas faire échouer un
+ * rafraîchissement que Vinted et eBay ont honoré. L'appelant lira l'instantané
+ * quoi qu'il arrive.
+ */
+export async function refreshLbcLive(cardId: string, now = Date.now()): Promise<void> {
+  if (!liveIsConfigured()) return;
+
+  // Un lot est ouvert : le rejoindre, quel que soit le délai. C'est le même
+  // clic, et le faire attendre le lot suivant n'aurait aucun sens.
+  if (batch) {
+    batch.ids.add(cardId);
+    await batch.done;
+    return;
+  }
+
+  if (now - lastRun < LIVE_COOLDOWN_MS) return;
+  lastRun = now;
+
+  const ids = new Set([cardId]);
+  const done = (async () => {
+    // Laisser les autres cartes du clic arriver avant de partir.
+    await new Promise((resolve) => setTimeout(resolve, BATCH_WINDOW_MS));
+    const wanted = await oldestFirst([...ids]);
+    try {
+      await runCollector(wanted.slice(0, LIVE_MAX));
+    } catch (error) {
+      // Le journal du collecteur porte déjà le détail ; ici on ne veut que ne
+      // pas propager.
+      console.error("[lbc] collecte à la demande", error);
+    } finally {
+      batch = null;
+    }
+  })();
+
+  batch = { ids, done };
+  await done;
+}
+
+/**
+ * Les cartes dont les annonces leboncoin sont les plus vieilles d'abord.
+ *
+ * C'est ce tri qui décide qui profite de `LIVE_MAX`. Une carte jamais
+ * collectée passe avant toutes les autres : elle n'a rien à montrer, tandis
+ * qu'une carte vue il y a dix minutes n'a presque rien à gagner.
+ */
+async function oldestFirst(ids: string[]): Promise<string[]> {
+  const snapshot = await readLbcCards();
+  return [...ids].sort(
+    (a, b) => (snapshot?.cards[a]?.at ?? 0) - (snapshot?.cards[b]?.at ?? 0),
+  );
+}

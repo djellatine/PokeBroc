@@ -19,7 +19,7 @@
 import path from "node:path";
 import { isConfigured as hasEbay, searchEbay, type EbayItem } from "./ebay";
 import { DATA_DIR, readJson, safeFileName, serialize, writeJson } from "./json-file";
-import { readLbcForCard, type LbcItem } from "./lbc";
+import { readLbcForCard, refreshLbcLive, type LbcItem } from "./lbc";
 import {
   bestQuery,
   condition,
@@ -270,6 +270,15 @@ async function collect(
     // Une seule passe, donc : la requête est déjà triée par date et
     // discriminante, il n'y a pas de second classement à aller chercher.
     if (source === "lbc") {
+      // « Actualiser » relance le collecteur, comme il relance les recherches
+      // Vinted et eBay. Sans cela le bouton ne tenait sa promesse que pour deux
+      // sources sur trois : leboncoin ne montrait que ce que la minuterie avait
+      // déposé, jusqu'à un tour de rotation plus tôt. Le regroupement et le
+      // plafond vivent dans `refreshLbcLive`, qui ne lève jamais — leboncoin
+      // muet ne doit pas faire échouer un rafraîchissement que les deux autres
+      // ont honoré.
+      if (live) await refreshLbcLive(card.id);
+
       const items = await readLbcForCard(card.id);
       const scored = scoreAll(items, card);
       return { items: scored.map((item) => fromLbc(item, card.id)), error: null };

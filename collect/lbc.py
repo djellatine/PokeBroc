@@ -507,6 +507,74 @@ def journal(target: Path, message: str) -> None:
         pass
 
 
+def refresh_cards(target: Path, raw: str, verbose: bool) -> int:
+    """Recollecte quelques cartes nommées, et rien d'autre.
+
+    Appelé par `lib/lbc.ts` derrière le bouton « Actualiser ». La rotation
+    ordinaire n'est pas touchée : son `offset` est relu et réécrit tel quel,
+    pour qu'un clic ne fasse pas sauter son tour à une carte.
+
+    L'ordre des identifiants est celui que le site a choisi — il place en tête
+    les cartes dont les annonces sont les plus anciennes. On le respecte, et
+    c'est lui qui décide qui profite du plafond.
+    """
+    ids = [entry for entry in (part.strip() for part in raw.split(",")) if entry]
+    if not ids:
+        print("leboncoin : aucune carte demandée", file=sys.stderr)
+        return 0
+
+    cards_target = target.parent / CARDS_NAME
+    by_id = {
+        entry["cardId"]: entry
+        for entry in (read_json(target.parent / QUERIES_NAME) or [])
+        if entry.get("cardId") and entry.get("query")
+    }
+    queries = [by_id[card_id] for card_id in ids if card_id in by_id]
+
+    if not queries:
+        # Aucune requête déposée pour ces cartes : la veille n'a pas encore
+        # tourné. Rien à faire, et surtout pas une erreur — le site retombera
+        # sur l'instantané précédent.
+        print("leboncoin : aucune requête connue pour ces cartes", file=sys.stderr)
+        return 0
+
+    started = time.time()
+    try:
+        session, impersonate = open_session(verbose)
+    except Blocked as error:
+        message = f"ÉCHEC à la demande, bloqué à l'amorçage ({error})"
+        print(f"leboncoin : {message}", file=sys.stderr)
+        journal(target, message)
+        return 2
+
+    previous = read_json(cards_target) or {}
+    # `CARD_SLICE` ne s'applique pas : le plafond est posé par l'appelant, qui
+    # seul sait combien de temps le visiteur accepte d'attendre.
+    saved = CARD_SLICE
+    try:
+        globals()["CARD_SLICE"] = len(queries)
+        cards, _, problems = collect_cards(session, queries, previous, verbose)
+    finally:
+        globals()["CARD_SLICE"] = saved
+
+    write_atomic(
+        cards_target,
+        # L'offset de la rotation est repris intact : ce passage-ci n'en fait
+        # pas partie et ne doit pas la faire avancer.
+        {"at": int(started * 1000), "offset": int(previous.get("offset") or 0), "cards": cards},
+    )
+
+    elapsed = time.time() - started
+    summary = (
+        f"{len(queries)} carte(s) à la demande "
+        f"({len(queries)} requêtes, {elapsed:.1f} s, {impersonate})"
+        + (f" — {len(problems)} erreur(s)" if problems else "")
+    )
+    print(f"leboncoin : {summary}")
+    journal(target, summary)
+    return 1 if problems and len(problems) == len(queries) else 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Collecte les lots récents sur leboncoin.")
     parser.add_argument(
@@ -521,6 +589,14 @@ def main() -> int:
         default=None,
         help="chemin de l'instantané (défaut : .data/lbc/recents.json à la racine)",
     )
+    parser.add_argument(
+        "--cards",
+        default=None,
+        help=(
+            "identifiants séparés par des virgules : ne collecte que ces cartes, "
+            "sans les lots. C'est le mode appelé par le bouton « Actualiser »."
+        ),
+    )
     parser.add_argument("--dry-run", action="store_true", help="n'écrit rien")
     parser.add_argument("--quiet", action="store_true", help="pas de détail par page")
     args = parser.parse_args()
@@ -529,6 +605,15 @@ def main() -> int:
     target = args.out or root / ".data" / "lbc" / "recents.json"
 
     started = time.time()
+
+    # Mode à la demande : le site a cliqué « Actualiser ». On ne refait pas les
+    # lots — ils ont leur propre fraîcheur, et le visiteur attend derrière une
+    # requête HTTP. Un seul amorçage, partagé par toutes les cartes du lot :
+    # c'est la requête que Datadome refuse, et la payer une fois par carte
+    # ferait de quarante-huit cartes suivies quarante-huit amorçages.
+    if args.cards is not None:
+        return refresh_cards(target, args.cards, verbose=not args.quiet)
+
     try:
         items, problems, impersonate, session = collect(args.window, verbose=not args.quiet)
     except Blocked as error:

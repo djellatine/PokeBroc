@@ -9,6 +9,16 @@
 # contient les empreintes de mots de passe de tout le monde. `ProtectSystem=strict`
 # rend le reste du disque inaccessible en écriture, et `ReadWritePaths` énumère
 # les deux seuls dossiers où il a quelque chose à écrire.
+#
+# Ce service lance aussi le collecteur leboncoin, sur clic d'« Actualiser » —
+# voir `refreshLbcLive` dans `lib/lbc.ts`. Rien à ajouter ici : `ProtectSystem`
+# rend le disque en lecture seule, pas inexécutable, et le collecteur n'écrit
+# que dans `.data/`, déjà énuméré. Il faut en revanche `LBC_PYTHON` dans
+# `.env.local`, pointant sur le venv que crée l'installateur :
+#
+#     LBC_PYTHON=/srv/pokebroc/.venv/bin/python
+#
+# Absent, le bouton se contente de Vinted et eBay, sans erreur.
 
 [Unit]
 Description=PokeBroc — site Next.js
