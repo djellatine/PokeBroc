@@ -57,6 +57,7 @@ import { compose, isPermanentFailure, selectFresh, type AlertGroup } from "../li
 import { readSnapshot, refreshCard } from "../lib/feed";
 import { plural } from "../lib/format";
 import { readJson, writeJson } from "../lib/json-file";
+import { writeLbcQueries } from "../lib/lbc";
 import {
   allTrackedCards,
   clearTelegramCode,
@@ -221,6 +222,19 @@ ${HELP}`);
 async function sweep(startedAt: number, options: Options): Promise<{ cards: number; errors: string[] }> {
   const cards = await allTrackedCards();
   const errors: string[] = [];
+
+  // Les requêtes que `collect/lbc.py` jouera à son prochain passage. Déposées
+  // ici parce que la veille tourne au même quart d'heure et tient déjà l'union
+  // des cartes suivies — et parce que `bestQuery` s'appuie sur `searchName`,
+  // qui traduit `☆` en « gold star » : redire cette règle en Python la ferait
+  // diverger au premier ajustement. Un échec ne doit pas emporter le balayage :
+  // le collecteur rejouera simplement la liste précédente.
+  try {
+    const queries = await writeLbcQueries(cards);
+    if (!options.quiet) console.error(`  ${queries.length} requêtes leboncoin déposées`);
+  } catch (error) {
+    errors.push(`requêtes leboncoin : ${error instanceof Error ? error.message : String(error)}`);
+  }
 
   for (const [index, favorite] of cards.entries()) {
     try {

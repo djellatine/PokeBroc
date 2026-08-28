@@ -21,10 +21,19 @@
  */
 
 import path from "node:path";
-import { DATA_DIR, readJson } from "./json-file";
+import { DATA_DIR, readJson, writeJson } from "./json-file";
+import { bestQuery } from "./match";
+import type { FavoriteCard } from "./store";
+import { getCard } from "./tcgdex";
 
 /** Doit rester identique au chemin par défaut de `collect/lbc.py`. */
 const FILE = path.join(DATA_DIR, "lbc", "recents.json");
+
+/** Les requêtes par carte, écrites ici et lues par `collect/lbc.py`. */
+const QUERIES_FILE = path.join(DATA_DIR, "lbc", "queries.json");
+
+/** Les annonces par carte, écrites par `collect/lbc.py` et lues ici. */
+const CARDS_FILE = path.join(DATA_DIR, "lbc", "cartes.json");
 
 /**
  * Annonce telle que le collecteur la dépose : exactement les champs que
@@ -134,3 +143,123 @@ export async function searchLbcRecents(now = Date.now()): Promise<LbcItem[]> {
   }
   return snapshot.items;
 }
+
+/* ------------------------------------------------------------- par carte */
+
+/**
+ * Pourquoi leboncoin est interrogé carte par carte, et pas en vrac.
+ *
+ * Les quatre requêtes génériques du flux de lots ramènent aussi des cartes à
+ * l'unité — leboncoin cherche large, « lot cartes pokemon » rend des
+ * « Brindibou ar 90/88 ». On a donc mesuré, le 29 août 2026, si ce vivier
+ * suffisait : 109 annonces de cartes publiées dans les trois heures,
+ * confrontées aux 48 cartes suivies, ont produit **zéro correspondance
+ * forte**. Vingt et une correspondances larges, toutes fausses — un
+ * « Raichu 14/62 » accroché à « Suicune 14/64 » par le seul numéro.
+ *
+ * La raison n'est pas que leboncoin n'a pas ces cartes : il les a. Cherchées
+ * nommément, `swsh8-271` sort à 750 € et `dc1-6` à trois exemplaires entre 100
+ * et 175 €. Elles sont simplement rares — le site publie ~78 annonces de
+ * cartes par heure, et la probabilité qu'une carte précise soit dans le lot
+ * d'une heure donnée est infime. Un flux générique ne les croisera jamais.
+ *
+ * D'où une requête par carte suivie. Et d'où la rotation : 48 requêtes par
+ * quart d'heure quadrupleraient le trafic vers un site qui refuse déjà une
+ * requête sur trois. Chaque passage en prend une tranche, et le tour complet
+ * se boucle en une heure — ce qui reste très en deçà du rythme auquel ces
+ * annonces apparaissent.
+ */
+
+/** Une carte suivie et le texte à chercher pour elle. */
+export interface LbcQuery {
+  cardId: string;
+  query: string;
+}
+
+/**
+ * Les annonces trouvées pour une carte, avec la date de leur collecte.
+ *
+ * Datée carte par carte et non globalement : la rotation fait que deux cartes
+ * du même instantané peuvent avoir été collectées à trois quarts d'heure
+ * d'écart, et présenter la plus ancienne comme fraîche serait faux.
+ */
+export interface LbcCardResult {
+  at: number;
+  items: LbcItem[];
+}
+
+export interface LbcCardsSnapshot {
+  at: number;
+  /** Rang de la prochaine requête à jouer : c'est la rotation qui l'avance. */
+  offset: number;
+  cards: Record<string, LbcCardResult>;
+}
+
+/**
+ * Compose les requêtes par carte et les dépose pour le collecteur.
+ *
+ * Écrit depuis TypeScript plutôt que composé en Python, pour la raison qui
+ * tient déjà `isPokemonLot` et `lotSize` de ce côté-ci : `bestQuery` s'appuie
+ * sur `searchName`, qui traduit `☆` en « gold star » et retire `δ`. Ces règles
+ * sont mesurées, testées, et la moitié des cartes suivies ici porte un de ces
+ * symboles. Les redire en Python serait les laisser diverger au premier
+ * ajustement.
+ *
+ * Appelé par la veille, qui tourne au même quart d'heure que le collecteur et
+ * connaît déjà l'union des cartes suivies.
+ */
+export async function writeLbcQueries(cards: FavoriteCard[]): Promise<LbcQuery[]> {
+  const queries: LbcQuery[] = [];
+
+  for (const favorite of cards) {
+    const card = await getCard(favorite.cardId);
+    // Une carte absente de TCGdex n'a pas de numéro imprimé, donc pas de
+    // requête discriminante. La sauter vaut mieux que chercher son nom nu, qui
+    // ramènerait 35 annonces sans rapport à noter pour rien.
+    if (card) queries.push({ cardId: favorite.cardId, query: bestQuery(card) });
+  }
+
+  await writeJson(QUERIES_FILE, queries);
+  return queries;
+}
+
+export async function readLbcCards(): Promise<LbcCardsSnapshot | null> {
+  const snapshot = await readJson<LbcCardsSnapshot>(CARDS_FILE);
+  if (!snapshot?.cards || typeof snapshot.cards !== "object") return null;
+  return snapshot;
+}
+
+/**
+ * Les annonces leboncoin d'une carte, si elles sont encore d'actualité.
+ *
+ * Le seuil est celui du tour de rotation, pas celui de `LBC_MAX_AGE_MS` : une
+ * carte n'est réinterrogée qu'une fois par tour, donc ses annonces ont par
+ * construction jusqu'à un tour d'âge. Les refuser à une heure ferait
+ * clignoter la source à chaque passage.
+ *
+ * Rend une liste vide plutôt que de lever, à la différence de
+ * `searchLbcRecents` : ici l'absence est le cas courant — la plupart des
+ * cartes n'ont aucune annonce sur leboncoin la plupart du temps — et ce n'est
+ * pas une panne.
+ */
+export async function readLbcForCard(
+  cardId: string,
+  now = Date.now(),
+  maxAge = LBC_CARD_MAX_AGE_MS,
+): Promise<LbcItem[]> {
+  const snapshot = await readLbcCards();
+  const found = snapshot?.cards[cardId];
+  if (!found || now - found.at > maxAge) return [];
+  return found.items;
+}
+
+/**
+ * Au-delà, les annonces d'une carte ne sont plus tenues pour à jour.
+ *
+ * Deux tours de rotation. Un seul aurait fait disparaître les annonces d'une
+ * carte dès qu'un passage manque son tour — ce qui arrive une fois sur trois,
+ * Datadome refusant à ce rythme — alors que l'annonce, elle, est toujours en
+ * ligne. Deux tours absorbent un passage manqué sans jamais présenter comme
+ * courante une annonce vieille de deux heures.
+ */
+export const LBC_CARD_MAX_AGE_MS = 2 * 60 * 60 * 1000;

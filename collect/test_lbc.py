@@ -13,8 +13,10 @@ sous une forme inattendue — le prix en liste, les attributs en tableau.
 
 import unittest
 from datetime import datetime, timezone
+from unittest import mock
 
-from lbc import attribute, normalize, parse_date, price_of
+import lbc
+from lbc import Blocked, attribute, collect_cards, normalize, parse_date, price_of
 
 
 class ParseDate(unittest.TestCase):
@@ -138,6 +140,82 @@ class Normalize(unittest.TestCase):
         self.assertIsNone(item["thumbnail"])
         self.assertIsNone(item["status"])
         self.assertIsNone(item["city"])
+
+
+def ad(list_id: int, subject: str) -> dict:
+    """Le minimum que `normalize` accepte."""
+    return {"list_id": list_id, "subject": subject, "price": [10]}
+
+
+class Rotation(unittest.TestCase):
+    """La tranche de cartes interrogée à chaque passage.
+
+    C'est le seul endroit du collecteur où un passage dépend du précédent, donc
+    le seul qui puisse dériver en silence : un offset qui n'avance pas rejoue
+    éternellement les douze mêmes cartes, et un dictionnaire remplacé au lieu
+    d'être complété fait perdre à chaque carte ses annonces dès qu'elle sort de
+    la tranche. Ni l'un ni l'autre ne lève, ni ne se voit dans le journal.
+    """
+
+    QUERIES = [{"cardId": f"c{i}", "query": f"carte {i}"} for i in range(10)]
+
+    def setUp(self):
+        # Le collecteur s'impose 2 s entre deux requêtes : trente secondes de
+        # suite de tests pour une arithmétique d'index.
+        patch = mock.patch.object(lbc.time, "sleep")
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def collect(self, previous=None, slice_size=3, fail=()):
+        def fake_search(session, query, page):
+            if query in fail:
+                raise Blocked(f"HTTP 403 sur « {query} »")
+            return [ad(hash(query) % 10_000, query)]
+
+        with mock.patch.object(lbc, "search", fake_search),              mock.patch.object(lbc, "CARD_SLICE", slice_size):
+            return collect_cards(None, self.QUERIES, previous or {}, verbose=False)
+
+    def test_premier_passage_prend_la_premiere_tranche(self):
+        cards, offset, problems = self.collect()
+        self.assertEqual(sorted(cards), ["c0", "c1", "c2"])
+        self.assertEqual(offset, 3)
+        self.assertEqual(problems, [])
+
+    def test_le_passage_suivant_reprend_ou_on_en_etait(self):
+        cards, offset, _ = self.collect({"offset": 3, "cards": {}})
+        self.assertEqual(sorted(cards), ["c3", "c4", "c5"])
+        self.assertEqual(offset, 6)
+
+    def test_le_tour_boucle(self):
+        cards, offset, _ = self.collect({"offset": 9, "cards": {}})
+        # Neuf, zéro, un : la tranche enjambe la fin de liste plutôt que de
+        # s'arrêter court, sinon la dernière carte serait servie seule.
+        self.assertEqual(sorted(cards), ["c0", "c1", "c9"])
+        self.assertEqual(offset, 2)
+
+    def test_les_cartes_hors_tranche_gardent_leurs_annonces(self):
+        """Le cœur de la rotation : compléter, jamais remplacer."""
+        kept = normalize(ad(1, "vieux"))
+        previous = {"offset": 0, "cards": {"c7": {"at": 1, "items": [kept]}}}
+        cards, _, _ = self.collect(previous)
+        self.assertIn("c7", cards)
+        self.assertEqual(cards["c7"]["items"][0]["title"], "vieux")
+        self.assertEqual(cards["c7"]["at"], 1)
+
+    def test_une_carte_refusee_n_emporte_pas_les_autres(self):
+        cards, offset, problems = self.collect(fail={"carte 1"})
+        self.assertEqual(sorted(cards), ["c0", "c2"])
+        self.assertEqual(len(problems), 1)
+        # L'offset avance quand même : réessayer la carte refusée au prochain
+        # passage retarderait les dix autres pour une annonce qui, neuf fois
+        # sur dix, n'existe pas.
+        self.assertEqual(offset, 3)
+
+    def test_sans_requetes_rien_a_faire(self):
+        """La veille n'a pas encore tourné : pas une requête, pas une erreur."""
+        with mock.patch.object(lbc, "search", mock.Mock(side_effect=AssertionError)):
+            cards, offset, problems = collect_cards(None, [], {}, verbose=False)
+        self.assertEqual((cards, offset, problems), ({}, 0, []))
 
 
 if __name__ == "__main__":

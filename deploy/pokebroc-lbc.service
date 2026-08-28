@@ -5,7 +5,12 @@
 # de `collect/lbc.py`.
 #
 # Facultatif : si Datadome bloque depuis cette IP, le script sort en erreur, le
-# site perd simplement leboncoin de son flux de lots, et rien d'autre ne bouge.
+# site perd leboncoin de son flux de lots et du fil des cartes, et rien d'autre
+# ne bouge.
+#
+# Ce service dépend de la veille sans la requérir : c'est elle qui dépose
+# `.data/lbc/queries.json`, la liste des cartes à chercher. Sans ce fichier, le
+# collecteur se limite aux lots — pas d'erreur, une moitié de mission.
 # `lib/lbc.ts` refuse d'ailleurs un instantané de plus d'une heure et demie plutôt que
 # de présenter comme « récent » un fichier oublié.
 
@@ -23,9 +28,11 @@ WorkingDirectory=/srv/pokebroc
 # une extension compilée, que la distribution ne fournit pas.
 ExecStart=/srv/pokebroc/.venv/bin/python collect/lbc.py --quiet
 
-# Neuf requêtes espacées de 2 s, plus les réessais : deux minutes couvrent
-# largement, et bornent un passage que Datadome ferait traîner.
-TimeoutStartSec=2min
+# Une vingtaine de requêtes espacées de 2 s — les lots, puis la tranche de
+# cartes suivies — plus les réessais d'amorçage et leur attente croissante.
+# Mesuré à 44 s pour seize requêtes ; cinq minutes laissent de la marge aux
+# passages contrariés tout en bornant celui que Datadome ferait traîner.
+TimeoutStartSec=5min
 
 NoNewPrivileges=true
 PrivateTmp=true

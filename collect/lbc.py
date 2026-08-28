@@ -100,6 +100,13 @@ QUERIES = [
 
 HOST = "https://www.leboncoin.fr"
 
+# Le contrat avec `lib/lbc.ts` : il compose les requêtes, on dépose les
+# annonces. Composer ici obligerait à redire en Python `searchName` et sa
+# traduction des symboles (`☆` → « gold star »), que la moitié des cartes
+# suivies utilise — et à les laisser diverger au premier ajustement.
+QUERIES_NAME = "queries.json"
+CARDS_NAME = "cartes.json"
+
 # Trois pages couvrent environ trois heures de mises en ligne : mesuré à ~30
 # annonces publiées par heure et par requête, pour 35 résultats par page. Le
 # filtrage sur la fenêtre reste l'autorité — ceci n'est que le nombre de pages
@@ -112,6 +119,18 @@ PAGES_PER_QUERY = 3
 # ce cas, dont une de 64 jours en première position. D'où la fenêtre, appliquée
 # sur `first_publication_date`, seule date de publication réelle.
 DEFAULT_WINDOW_H = 3.0
+
+# Requêtes par carte jouées à chaque passage. Le tour complet se boucle donc en
+# `ceil(cartes / SLICE)` passages — à 48 cartes suivies et un passage par quart
+# d'heure, une heure. Interroger les 48 à chaque fois quadruplerait le trafic
+# vers un site qui en refuse déjà une sur trois, pour des annonces qui
+# apparaissent au rythme de quelques-unes par semaine et par carte.
+CARD_SLICE = 12
+
+# Une seule page par carte : la requête est discriminante et triée par date, et
+# la page 2 remonte déjà à des mois. C'est le contraire des requêtes de lots,
+# larges par construction, où trois pages couvrent trois heures.
+CARD_PAGES = 1
 
 THROTTLE_S = 2.0
 TIMEOUT_S = 30.0
@@ -306,7 +325,9 @@ def search(session: requests.Session, query: str, page: int) -> list[dict]:
     return payload["props"]["pageProps"].get("searchData", {}).get("ads") or []
 
 
-def collect(window_h: float, verbose: bool) -> tuple[list[dict], list[str], str]:
+def collect(
+    window_h: float, verbose: bool
+) -> tuple[list[dict], list[str], str, requests.Session]:
     """Toutes les requêtes, dédupliquées, restreintes à la fenêtre.
 
     Les erreurs sont accumulées plutôt que propagées : une requête qui échoue
@@ -373,7 +394,77 @@ def collect(window_h: float, verbose: bool) -> tuple[list[dict], list[str], str]
             time.sleep(THROTTLE_S)
 
     ordered = sorted(items.values(), key=lambda item: item["createdAt"], reverse=True)
-    return ordered, problems, impersonate
+    return ordered, problems, impersonate, session
+
+
+def collect_cards(
+    session: requests.Session,
+    queries: list[dict],
+    previous: dict,
+    verbose: bool,
+) -> tuple[dict, int, list[str]]:
+    """Une tranche des cartes suivies, en repartant d'où le passage précédent
+    s'était arrêté.
+
+    Rend le dictionnaire complet — la tranche fraîche **par-dessus** ce qui
+    était déjà là, et non à la place. Sans cela, une carte hors tranche perdrait
+    ses annonces à chaque passage et n'en aurait qu'un quart d'heure par heure ;
+    c'est la rotation qui économise les requêtes, pas l'oubli.
+
+    Aucune notation ici : `scoreAll` décide en TypeScript, pour les trois places
+    de marché par le même chemin. On dépose ce que leboncoin a rendu.
+    """
+    cards = dict(previous.get("cards") or {})
+    offset = int(previous.get("offset") or 0)
+    problems: list[str] = []
+
+    if not queries:
+        return cards, offset, problems
+
+    offset %= len(queries)
+    slice_ = [queries[(offset + i) % len(queries)] for i in range(min(CARD_SLICE, len(queries)))]
+    now = int(time.time() * 1000)
+
+    for entry in slice_:
+        card_id, query = entry.get("cardId"), entry.get("query")
+        if not card_id or not query:
+            continue
+
+        time.sleep(THROTTLE_S)
+        try:
+            ads = search(session, query, 1)
+        except Blocked as error:
+            # Le passage garde ce qu'il a. Une carte non rafraîchie conserve
+            # ses annonces précédentes, que `LBC_CARD_MAX_AGE_MS` périmera si
+            # le blocage dure — deux tours, soit un passage manqué absorbé.
+            problems.append(str(error))
+            continue
+        except (RuntimeError, ValueError, KeyError) as error:
+            problems.append(str(error))
+            continue
+
+        items = [item for item in (normalize(ad) for ad in ads) if item is not None]
+        cards[card_id] = {"at": now, "items": items}
+
+        if verbose:
+            print(f"  {card_id} « {query} » : {len(items)} annonces", file=sys.stderr)
+
+    return cards, (offset + len(slice_)) % len(queries), problems
+
+
+def read_json(source: Path):
+    """Le pendant de `write_atomic`, tolérant à l'absence.
+
+    Un fichier manquant est le cas normal : `queries.json` n'existe pas tant
+    que la veille n'a pas tourné une fois, et `cartes.json` pas avant le
+    premier tour de rotation. Un fichier illisible l'est moins, mais il ne doit
+    pas plus faire échouer la collecte des lots — au pire la rotation repart de
+    zéro, ce qui coûte un tour.
+    """
+    try:
+        return json.loads(source.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
 
 
 def write_atomic(target: Path, payload: dict) -> None:
@@ -439,7 +530,7 @@ def main() -> int:
 
     started = time.time()
     try:
-        items, problems, impersonate = collect(args.window, verbose=not args.quiet)
+        items, problems, impersonate, session = collect(args.window, verbose=not args.quiet)
     except Blocked as error:
         # Aucune requête n'est passée. Le code de sortie le signale, le journal
         # dit quoi — les deux, parce que le premier seul est indéchiffrable.
@@ -455,6 +546,16 @@ def main() -> int:
         journal(target, message)
         return 3
 
+    # Les cartes suivies, sur la session déjà amorcée : c'est tout l'intérêt de
+    # les collecter ici plutôt que dans un second script — l'amorçage est la
+    # requête que Datadome refuse, et elle est déjà payée.
+    cards_target = target.parent / CARDS_NAME
+    queries = read_json(target.parent / QUERIES_NAME) or []
+    cards, offset, card_problems = collect_cards(
+        session, queries, read_json(cards_target) or {}, verbose=not args.quiet
+    )
+    problems += card_problems
+
     snapshot = {
         "at": int(started * 1000),
         "windowHours": args.window,
@@ -467,9 +568,11 @@ def main() -> int:
         snapshot["partial"] = " · ".join(dict.fromkeys(problems))
 
     elapsed = time.time() - started
+    swept = min(CARD_SLICE, len(queries))
     summary = (
         f"{len(items)} lots publiés dans les {args.window:g} h "
-        f"({len(QUERIES)} requêtes, {elapsed:.1f} s, {impersonate})"
+        f"+ {swept}/{len(queries)} cartes "
+        f"({len(QUERIES) + swept} requêtes, {elapsed:.1f} s, {impersonate})"
         + (f" — {len(problems)} erreur(s) : {snapshot.get('partial', '')}" if problems else "")
     )
     print(f"leboncoin : {summary}")
@@ -483,6 +586,11 @@ def main() -> int:
 
     write_atomic(target, snapshot)
     print(f"  → {target}")
+
+    if queries:
+        write_atomic(cards_target, {"at": int(started * 1000), "offset": offset, "cards": cards})
+        print(f"  → {cards_target}")
+
     journal(target, summary)
 
     # Rien collecté *et* que des erreurs : la minuterie doit pouvoir alerter.

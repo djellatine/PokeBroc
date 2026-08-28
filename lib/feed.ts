@@ -19,6 +19,7 @@
 import path from "node:path";
 import { isConfigured as hasEbay, searchEbay, type EbayItem } from "./ebay";
 import { DATA_DIR, readJson, safeFileName, serialize, writeJson } from "./json-file";
+import { readLbcForCard, type LbcItem } from "./lbc";
 import {
   bestQuery,
   condition,
@@ -69,7 +70,7 @@ export interface FeedCard {
  * en-tête — l'importer *comme valeur* depuis ici entraînerait `node:fs/promises`
  * dans le paquet client.
  */
-import type { Source } from "./source";
+import { SOURCE_NAMES, type Source } from "./source";
 export type { Source };
 
 export interface FeedItem {
@@ -172,7 +173,7 @@ type PendingItem = Omit<FeedItem, "firstSeen">;
 
 /** Champs communs aux deux places de marché, une fois l'annonce notée. */
 function common(
-  item: Scored<VintedItem> | Scored<EbayItem>,
+  item: Scored<VintedItem> | Scored<EbayItem> | Scored<LbcItem>,
   cardId: string,
 ): Omit<PendingItem, "id" | "source" | "country" | "auction" | "bids" | "endsAt"> {
   return {
@@ -226,6 +227,28 @@ function fromEbay(item: Scored<EbayItem>, cardId: string): PendingItem {
 }
 
 /**
+ * Une annonce leboncoin, telle que le collecteur l'a déposée.
+ *
+ * Les identifiants leboncoin sont des entiers, comme ceux de Vinted, d'où le
+ * même préfixage par la source — `lbc:3258659803` ne peut pas se confondre
+ * avec `vinted:3258659803`.
+ */
+function fromLbc(item: Scored<LbcItem>, cardId: string): PendingItem {
+  return {
+    ...common(item, cardId),
+    id: `lbc:${item.id}`,
+    source: "lbc",
+    // Seule source dont la provenance est connue sans lire le titre :
+    // leboncoin est franco-français, comme le pose déjà `lots.ts`.
+    country: "FR",
+    // Ni enchères ni ventes à durée limitée : tout y est à prix fixe.
+    auction: false,
+    bids: 0,
+    endsAt: null,
+  };
+}
+
+/**
  * Deux passes sur une place de marché, fusionnées.
  *
  * Rend toujours une liste, même vide : l'erreur éventuelle est retournée à
@@ -240,6 +263,18 @@ async function collect(
   live = false,
 ): Promise<{ items: PendingItem[]; error: string | null }> {
   try {
+    // Leboncoin n'interroge rien : le collecteur a déjà cherché cette carte
+    // nommément, sur sa propre rotation. Voir l'en-tête de `lib/lbc.ts` — la
+    // pile TLS de Node se fait refuser par Datadome, et une carte absente du
+    // dernier tour rend simplement une liste vide, ce qui est le cas courant.
+    // Une seule passe, donc : la requête est déjà triée par date et
+    // discriminante, il n'y a pas de second classement à aller chercher.
+    if (source === "lbc") {
+      const items = await readLbcForCard(card.id);
+      const scored = scoreAll(items, card);
+      return { items: scored.map((item) => fromLbc(item, card.id)), error: null };
+    }
+
     // Les deux passes partent ensemble ; les clients les sérialisent de toute
     // façon, mais on n'attend pas la première pour poster la seconde.
     if (source === "vinted") {
@@ -258,7 +293,7 @@ async function collect(
     const scored = scoreAll([...relevant.items, ...newest.items], card);
     return { items: scored.map((item) => fromEbay(item, card.id)), error: null };
   } catch (error) {
-    const label = source === "vinted" ? "Vinted" : "eBay";
+    const label = SOURCE_NAMES[source];
     const message = error instanceof Error ? error.message : `Recherche ${label} impossible.`;
     return { items: [], error: `${label} : ${message}` };
   }
@@ -312,8 +347,11 @@ export async function refreshCard(
     const query = bestQuery(card);
 
     // Sans clés eBay, le site fonctionne sur Vinted seul plutôt que de signaler
-    // une erreur de collecte à chaque carte.
-    const sources: Source[] = hasEbay() ? ["vinted", "ebay"] : ["vinted"];
+    // une erreur de collecte à chaque carte. Leboncoin est toujours de la
+    // partie : il ne coûte aucune requête ici — il relit ce que la minuterie a
+    // déposé — et rend une liste vide quand la carte n'a pas encore eu son
+    // tour, ce qui n'est pas une erreur.
+    const sources: Source[] = hasEbay() ? ["vinted", "ebay", "lbc"] : ["vinted", "lbc"];
     const collected = await Promise.all(
       sources.map((source) => collect(source, card, query, force)),
     );
@@ -343,9 +381,18 @@ export async function refreshCard(
       if (!known || item.score > known.score) best.set(item.id, item);
     }
 
+    // À score égal, la plus récente. Le tri ne portait que sur le score, et
+    // `Array.prototype.sort` étant stable, les égalités retombaient sur l'ordre
+    // de collecte : Vinted, puis eBay, puis leboncoin. Autrement dit la source
+    // arrivée en dernier était systématiquement la première tronquée par
+    // `MAX_PER_CARD` — mesuré sur `hgss4-94`, six correspondances fortes
+    // leboncoin, dont « Ectoplasma Prime 94/102 » à 160 €, sortaient du fil
+    // derrière quarante annonces Vinted et eBay de même score. Départager par
+    // date n'a pas seulement le mérite d'être neutre : c'est ce que la page
+    // promet, les derniers mis en ligne d'abord.
     const kept = [...best.values()]
       .filter((item) => item.score >= WIDE_SCORE)
-      .sort((a, b) => b.score - a.score)
+      .sort((a, b) => b.score - a.score || (b.createdAt ?? 0) - (a.createdAt ?? 0))
       .slice(0, MAX_PER_CARD);
 
     const firstSeen = await recordSightings(

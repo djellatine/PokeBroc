@@ -400,6 +400,49 @@ ce que le reste ne peut pas faire : récupérer, normaliser, écrire. `isPokemon
 
 Le site, lui, ne lit que le disque et ne contacte jamais leboncoin.
 
+### Leboncoin cherche vos cartes, pas seulement des lots
+
+Leboncoin n'a longtemps alimenté que la page Lots, avec quatre requêtes génériques. On a mesuré, le
+29 août 2026, si ce vivier suffisait à alimenter aussi le fil des cartes : ces requêtes ramènent bien
+des cartes à l'unité — leboncoin cherche large, « lot cartes pokemon » rend des « Brindibou ar
+90/88 » — mais **109 annonces de cartes publiées dans les trois heures, confrontées aux 48 cartes
+suivies, ont produit zéro correspondance forte**. Vingt et une correspondances larges, toutes
+fausses : un « Raichu 14/62 » accroché à « Suicune 14/64 » par le seul numéro.
+
+Ce n'est pas que leboncoin n'a pas ces cartes. Cherchées **nommément**, elles sortent :
+
+| Requête | Trouvé |
+| --- | --- |
+| `Ectoplasma ex 108/112` | 3 annonces, de 385 à 600 € |
+| `Suicune 14/64` | 6 annonces, dès 120 € |
+| `Rayquaza gold star 107/107` | 1 annonce à 5 000 € — la carte n'a *rien* sur eBay |
+
+Elles sont simplement rares. Le site publie ~78 annonces de cartes par heure ; la probabilité qu'une
+carte précise soit dans le lot d'une heure donnée est infime, et un flux générique ne la croisera
+jamais. D'où une requête par carte suivie.
+
+**Et d'où la rotation.** Quarante-huit requêtes par quart d'heure quadrupleraient le trafic vers un
+site qui en refuse déjà une sur trois. Chaque passage en prend douze, et le tour complet se boucle en
+une heure — très en deçà du rythme auquel ces annonces apparaissent. Un passage coûte donc seize
+requêtes au lieu de douze, mesuré à 44 s.
+
+Le partage des rôles suit celui du reste du projet : **`lib/lbc.ts` compose les requêtes**, le
+collecteur les joue. `bestQuery` s'appuie sur `searchName`, qui traduit `☆` en « gold star » et
+retire `δ` — et la moitié des cartes suivies porte un de ces symboles. Redire ces règles en Python
+serait les laisser diverger au premier ajustement. C'est la veille qui dépose la liste, tournant au
+même quart d'heure et tenant déjà l'union des cartes suivies.
+
+Relevé sur la première tranche réelle : **7 cartes sur 12 avec au moins une correspondance forte, 29
+au total**, toutes justes.
+
+Un défaut est apparu à cette occasion, et il ne concernait pas leboncoin seul. `MAX_PER_CARD` tronque
+le fil à 40 annonces après un tri par score, et `sort` étant stable, les égalités retombaient sur
+l'ordre de collecte : Vinted, eBay, puis leboncoin. La source arrivée en dernier était donc
+systématiquement la première sacrifiée — sur `hgss4-94`, six correspondances fortes leboncoin, dont
+un « Ectoplasma Prime 94/102 » à 160 €, sortaient du fil derrière quarante annonces de même score.
+Les égalités se départagent désormais **par date de mise en ligne**, ce qui est à la fois neutre et
+conforme à ce que la page promet.
+
 #### Ce que coûte une IP de centre de données, mesuré
 
 Ce paragraphe affirmait qu'un hébergeur « se ferait bloquer dès la première requête ». C'était une
@@ -803,14 +846,14 @@ lib/
   image-cache.ts            cache disque des visuels, préchauffage, purge
   tcgdex.ts                 cartes, extensions, images, cotes
   vinted.ts                 session, throttle, cache, normalisation
-  lbc.ts                    lecture des lots leboncoin (aucune requête : voir collect/)
+  lbc.ts                    lots et cartes leboncoin (aucune requête : voir collect/)
   match.ts                  notation des annonces, état, requêtes
   format.ts                 euros, pourcentages, ancienneté
   alerts.ts                 ce qu'une alerte retient, et comment elle se lit
   telegram.ts               bot Telegram : envoi, réception, échappement
   veille.ts                 état de la veille (appairages, repère des alertes)
 collect/
-  lbc.py                    collecteur leboncoin — hors du site, sur minuterie
+  lbc.py                    collecteur leboncoin — lots, puis une tranche des cartes suivies
   test_lbc.py               ses tests, sans réseau
   veille.ts                 balayage de fond + alertes — hors du site, sur minuterie
 deploy/
@@ -820,6 +863,7 @@ deploy/
   Caddyfile                 reverse proxy et HTTPS automatique
   pokebroc*.service/.timer  le site et ses trois minuteries
 tests/                      node:test — match, ebay, rate-limit, sightings, format, alertes
+                            collect/test_lbc.py — normalisation et rotation, sans réseau
 ```
 
 ## Limites connues
