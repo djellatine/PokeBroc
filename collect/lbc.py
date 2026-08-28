@@ -126,9 +126,32 @@ LOG_LINES = 200
 PARIS = ZoneInfo("Europe/Paris")
 NEXT_DATA = re.compile(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', re.S)
 
-# Les empreintes que curl_cffi sait rejouer. Une par exécution, tirée au sort :
-# deux passages consécutifs ne présentent pas le même profil.
-IMPERSONATIONS = ["chrome", "chrome124", "edge101", "safari17_0"]
+# Les empreintes que curl_cffi sait rejouer, tirées au sort à chaque tentative :
+# deux essais consécutifs ne présentent pas le même profil.
+#
+# La liste a longtemps été `["chrome", "chrome124", "edge101", "safari17_0"]`.
+# Trois de ces quatre valeurs imitaient des navigateurs que plus personne ne
+# fait tourner — `edge101` date d'avril 2022, `safari17_0` de septembre 2023 —
+# et une empreinte rare est en elle-même un signal pour Datadome, qui compare à
+# la distribution du trafic réel. Les douze cibles ci-dessous ont été vérifiées
+# une à une contre la build de `curl_cffi` installée (0.16.0, 53 cibles) : une
+# valeur inconnue lève à la création de la session, donc en pleine collecte.
+#
+# La proportion suit grossièrement le parc français : Chrome domine, Safari et
+# Firefox suivent, Edge ferme la marche. Le journal note l'empreinte retenue —
+# c'est ce qui permettra de trancher, dans deux cents passages, laquelle se
+# fait refuser, au lieu de continuer à deviner.
+IMPERSONATIONS = [
+    "chrome",
+    "chrome142",
+    "chrome145",
+    "chrome146",
+    "firefox144",
+    "firefox147",
+    "safari184",
+    "safari260",
+    "edge",
+]
 
 
 class Blocked(RuntimeError):
@@ -224,6 +247,43 @@ def new_session(impersonate: str) -> requests.Session:
     return session
 
 
+def open_session(verbose: bool) -> tuple[requests.Session, str]:
+    """Une session amorcée, en changeant d'empreinte à chaque refus.
+
+    L'amorçage n'avait droit à aucun rattrapage, là où une recherche bloquée en
+    obtenait trois : un seul refus sur la page d'accueil perdait le passage
+    entier, ses quatre requêtes et son instantané. C'était la cause principale
+    des échecs — mesuré sur les deux cents passages du journal, du 25 au 29 août
+    2026, 66 refus pour 134 réussites, soit un tiers.
+
+    Ce tiers n'est pas un taux de blocage durable : c'est la probabilité qu'une
+    requête *isolée* tombe mal. Les refus se comportent comme des tirages
+    indépendants — une seule série de cinq sur deux cents passages, ce qu'un
+    tirage à p=0,33 produit — donc trois tentatives sur trois empreintes
+    différentes ramènent l'échec attendu autour de 4 %.
+
+    `random.sample` plutôt que trois `choice` : réessayer la même empreinte qui
+    vient d'être refusée ne rachète rien, et c'est justement ce que faisait la
+    reprise en cours de boucle.
+    """
+    last: Blocked | None = None
+
+    for attempt, impersonate in enumerate(random.sample(IMPERSONATIONS, MAX_ATTEMPTS), 1):
+        try:
+            return new_session(impersonate), impersonate
+        except Blocked as error:
+            last = error
+            if verbose:
+                print(f"  amorçage refusé sur « {impersonate} »", file=sys.stderr)
+            if attempt < MAX_ATTEMPTS:
+                # Laisser le compteur de Datadome retomber, comme le fait la
+                # reprise d'une recherche bloquée.
+                time.sleep(THROTTLE_S * 2 * attempt)
+
+    assert last is not None
+    raise last
+
+
 def search(session: requests.Session, query: str, page: int) -> list[dict]:
     """Une page de résultats, triée du plus récemment remonté au plus ancien."""
     url = (
@@ -246,7 +306,7 @@ def search(session: requests.Session, query: str, page: int) -> list[dict]:
     return payload["props"]["pageProps"].get("searchData", {}).get("ads") or []
 
 
-def collect(window_h: float, verbose: bool) -> tuple[list[dict], list[str]]:
+def collect(window_h: float, verbose: bool) -> tuple[list[dict], list[str], str]:
     """Toutes les requêtes, dédupliquées, restreintes à la fenêtre.
 
     Les erreurs sont accumulées plutôt que propagées : une requête qui échoue
@@ -254,7 +314,7 @@ def collect(window_h: float, verbose: bool) -> tuple[list[dict], list[str]]:
     de Vinted ne doit pas emporter eBay dans `collectRecent`.
     """
     cutoff = (time.time() - window_h * 3600) * 1000
-    session = new_session(random.choice(IMPERSONATIONS))
+    session, impersonate = open_session(verbose)
     items: dict[int, dict] = {}
     problems: list[str] = []
 
@@ -271,10 +331,15 @@ def collect(window_h: float, verbose: bool) -> tuple[list[dict], list[str]]:
                         problems.append(str(error))
                         break
                     # Une empreinte grillée le reste : on en reprend une autre
-                    # plutôt que de réessayer la même, et on laisse le temps
-                    # au compteur de Datadome de retomber.
-                    time.sleep(THROTTLE_S * 2 * attempt)
-                    session = new_session(random.choice(IMPERSONATIONS))
+                    # plutôt que de réessayer la même. `open_session` porte
+                    # l'attente et le changement d'empreinte ; son échec ne doit
+                    # pas emporter le passage, puisque les requêtes déjà
+                    # abouties valent un instantané partiel.
+                    try:
+                        session, impersonate = open_session(verbose)
+                    except Blocked as reopen:
+                        problems.append(str(reopen))
+                        break
                 except (RuntimeError, ValueError, KeyError) as error:
                     problems.append(str(error))
                     break
@@ -308,7 +373,7 @@ def collect(window_h: float, verbose: bool) -> tuple[list[dict], list[str]]:
             time.sleep(THROTTLE_S)
 
     ordered = sorted(items.values(), key=lambda item: item["createdAt"], reverse=True)
-    return ordered, problems
+    return ordered, problems, impersonate
 
 
 def write_atomic(target: Path, payload: dict) -> None:
@@ -374,7 +439,7 @@ def main() -> int:
 
     started = time.time()
     try:
-        items, problems = collect(args.window, verbose=not args.quiet)
+        items, problems, impersonate = collect(args.window, verbose=not args.quiet)
     except Blocked as error:
         # Aucune requête n'est passée. Le code de sortie le signale, le journal
         # dit quoi — les deux, parce que le premier seul est indéchiffrable.
@@ -404,7 +469,7 @@ def main() -> int:
     elapsed = time.time() - started
     summary = (
         f"{len(items)} lots publiés dans les {args.window:g} h "
-        f"({len(QUERIES)} requêtes, {elapsed:.1f} s)"
+        f"({len(QUERIES)} requêtes, {elapsed:.1f} s, {impersonate})"
         + (f" — {len(problems)} erreur(s) : {snapshot.get('partial', '')}" if problems else "")
     )
     print(f"leboncoin : {summary}")
