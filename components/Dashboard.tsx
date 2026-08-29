@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { clearNewBadges } from "@/app/actions/favorites";
 import CollectionStrip, { type CardCount } from "@/components/CollectionStrip";
@@ -72,6 +72,47 @@ const FILTERS_KEY = "pokebroc:filtres";
 const MAX_PER_CARD = 12;
 const PAGE_SIZE = 60;
 
+/**
+ * Collectes menées de front pendant un rafraîchissement.
+ *
+ * Le fil lançait une requête **par carte suivie**, toutes en même temps — 48
+ * appels simultanés à `/api/feed`. Un navigateur n'ouvre que six connexions par
+ * origine : les quarante-deux autres attendaient, et la navigation vers la page
+ * Lots attendait derrière elles. Cliquer « Lots » pendant une actualisation ne
+ * faisait donc rien pendant une bonne minute.
+ *
+ * Les brider ne coûte rien en durée, et c'est ce qui rend l'arbitrage facile :
+ * `lib/vinted.ts` sérialise **déjà** tous ses appels à 350 ms d'intervalle
+ * (`schedule`), et `lib/ebay.ts` fait de même. Quarante-huit cartes, c'est-à-dire
+ * quatre-vingt-seize recherches Vinted, prennent une trentaine de secondes quoi
+ * qu'il arrive. Les envoyer toutes d'un coup n'accélérait rien : ça ne faisait
+ * qu'occuper les connexions du navigateur pour attendre plus longtemps.
+ *
+ * Quatre suffisent à garder la file du serveur pleine, et laissent de quoi
+ * charger une autre page.
+ */
+const REFRESH_CONCURRENCY = 4;
+
+/**
+ * Applique `run` à chaque élément, `limit` à la fois.
+ *
+ * `Promise.all` sur un `map` lance tout ; ici les ouvriers se partagent une file
+ * commune, de sorte qu'un seul d'entre eux avance à la fois par emplacement.
+ */
+async function pooled<T>(
+  items: T[],
+  limit: number,
+  run: (item: T) => Promise<void>,
+): Promise<void> {
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      await run(items[next++]);
+    }
+  });
+  await Promise.all(workers);
+}
+
 /** Rythme de rafraîchissement des « il y a 2 h » affichés dans le fil. */
 const CLOCK_MS = 60_000;
 
@@ -118,6 +159,17 @@ export default function Dashboard({
    * que calculées depuis `Date.now()` au rendu, qui rendrait le composant impur.
    */
   const [cooldown, setCooldown] = useState(0);
+
+  /**
+   * Le rafraîchissement en cours, pour pouvoir l'interrompre.
+   *
+   * Le rattrapage automatique s'annulait déjà en quittant la page ; le bouton
+   * « Actualiser », non. Ses collectes continuaient donc de partir après qu'on
+   * est passé aux Lots — et depuis que leboncoin lance un vrai collecteur, ce
+   * n'était plus seulement une requête pour rien.
+   */
+  const forcedRun = useRef<AbortController | null>(null);
+  useEffect(() => () => forcedRun.current?.abort(), []);
 
   const staleKey = initialStaleIds.join("|");
 
@@ -166,23 +218,31 @@ export default function Dashboard({
     setSettled([]);
     setForced(ids);
 
+    forcedRun.current?.abort();
+    const controller = new AbortController();
+    forcedRun.current = controller;
+
     let failures = 0;
 
-    void Promise.all(
-      ids.map(async (cardId) => {
-        try {
-          const res = await fetch(`/api/feed?cardId=${encodeURIComponent(cardId)}&force=1`);
-          const data = (await res.json()) as Snapshot & { error?: string };
-          if (!res.ok) throw new Error(data.error ?? "Recherche d’annonces impossible.");
-          setSnapshots((current) => ({ ...current, [cardId]: data }));
-        } catch (err) {
-          failures += 1;
-          setError(err instanceof Error ? err.message : "Recherche d’annonces impossible.");
-        } finally {
-          setSettled((current) => [...current, cardId]);
-        }
-      }),
-    ).then(() => {
+    void pooled(ids, REFRESH_CONCURRENCY, async (cardId) => {
+      if (controller.signal.aborted) return;
+      try {
+        const res = await fetch(`/api/feed?cardId=${encodeURIComponent(cardId)}&force=1`, {
+          signal: controller.signal,
+        });
+        const data = (await res.json()) as Snapshot & { error?: string };
+        if (controller.signal.aborted) return;
+        if (!res.ok) throw new Error(data.error ?? "Recherche d’annonces impossible.");
+        setSnapshots((current) => ({ ...current, [cardId]: data }));
+      } catch (err) {
+        if (controller.signal.aborted || (err as Error).name === "AbortError") return;
+        failures += 1;
+        setError(err instanceof Error ? err.message : "Recherche d’annonces impossible.");
+      } finally {
+        if (!controller.signal.aborted) setSettled((current) => [...current, cardId]);
+      }
+    }).then(() => {
+      if (controller.signal.aborted) return;
       if (failures < ids.length) setError(null);
       // Rendre la main au rattrapage automatique : sans ça, une carte ajoutée
       // plus tard resterait hors du décompte d'avancement.
@@ -198,27 +258,26 @@ export default function Dashboard({
     const controller = new AbortController();
     let failures = 0;
 
-    void Promise.all(
-      ids.map(async (cardId) => {
-        try {
-          const res = await fetch(`/api/feed?cardId=${encodeURIComponent(cardId)}`, {
-            signal: controller.signal,
-          });
-          const data = (await res.json()) as Snapshot & { error?: string };
-          if (controller.signal.aborted) return;
-          if (!res.ok) throw new Error(data.error ?? "Recherche d’annonces impossible.");
-          setSnapshots((current) => ({ ...current, [cardId]: data }));
-        } catch (err) {
-          if (controller.signal.aborted || (err as Error).name === "AbortError") return;
-          failures += 1;
-          setError(err instanceof Error ? err.message : "Recherche d’annonces impossible.");
-        } finally {
-          if (!controller.signal.aborted) {
-            setSettled((current) => [...current, cardId]);
-          }
+    void pooled(ids, REFRESH_CONCURRENCY, async (cardId) => {
+      if (controller.signal.aborted) return;
+      try {
+        const res = await fetch(`/api/feed?cardId=${encodeURIComponent(cardId)}`, {
+          signal: controller.signal,
+        });
+        const data = (await res.json()) as Snapshot & { error?: string };
+        if (controller.signal.aborted) return;
+        if (!res.ok) throw new Error(data.error ?? "Recherche d’annonces impossible.");
+        setSnapshots((current) => ({ ...current, [cardId]: data }));
+      } catch (err) {
+        if (controller.signal.aborted || (err as Error).name === "AbortError") return;
+        failures += 1;
+        setError(err instanceof Error ? err.message : "Recherche d’annonces impossible.");
+      } finally {
+        if (!controller.signal.aborted) {
+          setSettled((current) => [...current, cardId]);
         }
-      }),
-    ).then(() => {
+      }
+    }).then(() => {
       // Une carte en échec sur dix n'est qu'un détail ; tout échouer est un
       // vrai problème, et c'est le seul cas qui mérite de rester affiché.
       if (!controller.signal.aborted && failures < ids.length) setError(null);

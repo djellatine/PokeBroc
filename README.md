@@ -298,6 +298,28 @@ Les collectes sont désormais rangées sur le disque, un fichier par carte (`lib
 - deux visiteurs qui suivent la même carte partagent la même collecte, sérialisée par carte ;
 - ajouter une carte déclenche sa collecte sans l'attendre, pendant qu'on en cherche d'autres.
 
+### Quatre collectes de front, et pas quarante-huit
+
+« Actualiser » émet une requête **par carte suivie**. À quarante-huit cartes, c'était quarante-huit
+appels simultanés à `/api/feed` — et un navigateur n'ouvre que six connexions par origine. Les
+quarante-deux autres attendaient, et **la navigation vers la page Lots attendait derrière elles** :
+cliquer sur « Lots » pendant une actualisation ne faisait rien pendant une bonne minute.
+
+Les brider ne coûte pourtant rien en durée, et c'est ce qui rend l'arbitrage facile : `lib/vinted.ts`
+sérialise déjà tous ses appels à 350 ms d'intervalle, et `lib/ebay.ts` fait de même. Quatre-vingt-seize
+recherches Vinted prennent une trentaine de secondes quoi qu'il arrive ; les envoyer d'un coup
+n'accélérait rien, cela occupait seulement les connexions du navigateur pour attendre plus longtemps.
+Quatre suffisent à garder la file du serveur pleine.
+
+Le bouton s'annule aussi en quittant la page, ce que seul le rattrapage automatique faisait jusqu'ici.
+Depuis que leboncoin lance un vrai collecteur, une collecte poursuivie après le départ n'est plus une
+simple requête pour rien.
+
+Le compromis, dit franchement : les quatre premières cartes attendent ensemble le passage leboncoin
+(une quinzaine de secondes), là où elles se noyaient auparavant dans quarante-quatre collectes
+parallèles. Une actualisation complète dure donc une dizaine de secondes de plus — en échange d'une
+page qui reste navigable pendant tout ce temps.
+
 ## Ce qui est nouveau l'est vraiment
 
 Sans mémoire du passé, un utilisateur qui revient trois fois par jour rescanne à l'œil les mêmes deux
