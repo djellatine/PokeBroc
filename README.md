@@ -34,6 +34,7 @@ Chaque annonce est donc re-notée côté serveur à partir du titre :
 | Lot / classeur / display | −2 |
 | Annonce sponsorisée | −1 |
 | Reproduction (`custom`, `proxy`, `orica`…) | −8 |
+| Ni une carte, ni une vente (voir plus bas) | −8 |
 
 Le fil ne retient par défaut que les annonces à score ≥ 8, c'est-à-dire celles qui citent le nom
 **et** le numéro ou l'extension. C'est la condition pour que la comparaison à la cote ait un sens :
@@ -47,6 +48,53 @@ pour une carte gradée PSA.
 La pénalité sur les reproductions est calibrée pour faire passer sous le seuil strict une annonce
 dont le titre est par ailleurs parfait. Sans elle, un proxy à 3 € affichait −97 % et trônait en tête
 des « meilleures affaires ».
+
+### Ce qui trônait quand même en tête
+
+La même pénalité manquait à deux familles d'annonces, et le relevé du 29 août 2026 est sans appel :
+sur la page d'accueil, tri « Meilleures affaires », filtres par défaut, **les quinze premières
+annonces étaient toutes fausses**. Une peluche, une vitrine de présentation vide, deux
+protège-cartes, quatre autocollants Merlin ou Dunkin, deux vignettes Topps, une carte d'une autre
+extension, et trois annonces d'achat à 1 €.
+
+Ce n'est pas une marge d'erreur, et c'est ce qui rend le problème structurel plutôt qu'anecdotique :
+
+> Un objet à 3 € rapporté à la cote d'une carte à 1 000 € affiche **−100 %**, un écart qu'aucune
+> vraie occasion ne peut battre. Le bruit ne se répartit donc pas dans la liste — il se concentre
+> exactement là où le regard se pose en premier.
+
+Rapporté à l'ensemble, ces annonces sont rares : 23 sur 871. Mais elles occupaient tout le haut du
+classement, et enterraient de vraies affaires — un `Ectoplasma Prime 94/102` à 105 € sur une cote de
+1 028 €, invisible sous quatre autocollants.
+
+D'où deux vocabulaires éliminatoires, sur le modèle des reproductions :
+
+- **Ce n'est pas une carte** — `peluche`, `figurine`, `protege carte`, `protection illustree`,
+  `vitrine`, `toploader`, `sleeve`, `sticker`, `autocollant`, `vignette`, et les marques des
+  vignettes des années 1990 (`merlin`, `panini`, `amada`, `topps`, `dunkin`, `boomer`), qui portent
+  le nom du Pokémon et un numéro de série — d'où la confusion.
+- **Ce n'est pas une vente** — `recherche`, `echange`, `achete`, `achat`. Le vocabulaire est étroit à
+  dessein : `recherche` et `recherchee` restent deux mots distincts après `normalize`, sans quoi
+  « carte très recherchée » tomberait avec.
+
+### Une autre impression du même Pokémon
+
+`Salamèche 98/165` n'est pas `Salamèche 98/97` — le dénominateur le dit explicitement. Sept annonces
+de ce genre affichaient jusqu'à −85 % de la cote d'une carte qu'elles ne vendaient pas. La règle du
+numéro acceptait le numéro **nu** et ne regardait jamais ce qui le suivait.
+
+Elles ne sont pas écartées pour autant : tomber sur une autre impression de son Pokémon est un
+hasard qui vaut d'être vu, et c'est à quoi sert un fil. Elles **perdent leur écart à la cote**, qui
+serait celui d'une autre carte — exactement le traitement que `feed.ts` réserve déjà à une enchère
+eBay en cours, et pour la même raison : mieux vaut un écart vide qu'un écart faux, et le lecteur
+juge. N'ayant plus d'écart, elles cessent mécaniquement de coiffer le classement.
+
+Les **deux** décomptes de TCGdex sont acceptés — `official` et `total`, soit « 102 » et « 103 » pour
+une extension à cartes secrètes. Les vendeurs emploient l'un ou l'autre, et n'en retenir qu'un aurait
+fait passer la moitié des annonces légitimes pour une autre impression.
+
+Effet mesuré sur les 871 annonces alors visibles : 23 écartées, 13 privées de leur écart, et un haut
+de classement qui ne contient plus que de vraies cartes.
 
 ### Les lots ont leur propre recherche, et leur notation inverse
 
@@ -883,7 +931,7 @@ lib/
   tcgdex.ts                 cartes, extensions, images, cotes
   vinted.ts                 session, throttle, cache, normalisation
   lbc.ts                    lots et cartes leboncoin (aucune requête : voir collect/)
-  match.ts                  notation des annonces, état, requêtes
+  match.ts                  notation des annonces, état, requêtes, vocabulaires éliminatoires
   format.ts                 euros, pourcentages, ancienneté
   alerts.ts                 ce qu'une alerte retient, et comment elle se lit
   telegram.ts               bot Telegram : envoi, réception, échappement

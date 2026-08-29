@@ -22,6 +22,92 @@ import { DRACAUFEU, DRACAUFEU_STAR, EOKO_DELTA, SANS_COTE, makeItem } from "./he
 const score = (title: string, extra = {}) =>
   scoreItem(makeItem({ title, ...extra }), DRACAUFEU).match;
 
+describe("scoreItem — ce qui n'est ni une carte ni une vente", () => {
+  /**
+   * Ces annonces arrivaient en tête du tri « Meilleures affaires », et pas par
+   * hasard : un objet à 3 € rapporté à la cote d'une carte à 1 000 € affiche
+   * −100 %, un écart qu'aucune vraie occasion ne peut battre. Le bruit ne se
+   * répartissait donc pas dans la liste, il se concentrait exactement là où le
+   * regard se pose en premier. Mesuré le 29 août 2026 : les quinze premières
+   * annonces de la page d'accueil, aucune n'était la carte cherchée.
+   */
+  const rejette = (title: string) => {
+    const match = score(title);
+    assert.equal(match.junk, true, `« ${title} » aurait dû être écartée`);
+    assert.ok(match.score < WIDE_SCORE, `« ${title} » reste au-dessus du seuil`);
+  };
+
+  it("écarte les autocollants et vignettes des années 1990", () => {
+    rejette("Sticker Dracaufeu n°4 - Sticker Pokémon Merlin 1999");
+    rejette("Carte Pokémon Topps #4 Dracaufeu");
+    rejette("Dunkin Boomer Sticker carte Dracaufeu 4");
+    rejette("Vignette Panini Dracaufeu 4/102");
+  });
+
+  it("écarte ce qui n'est pas une carte du tout", () => {
+    rejette("Peluche Pokémon Dracaufeu #4");
+    rejette("Protection Illustrée Carte Gradée PSA - Dracaufeu 4/102");
+    rejette("Dracaufeu 4/102 - Vitrine de présentation");
+  });
+
+  it("écarte les annonces d'achat, qui portent un prix symbolique", () => {
+    // Un euro rapporté à une cote de cent affiche −99 % et coiffe le
+    // classement, alors que personne ne vend quoi que ce soit.
+    rejette("RECHERCHE Dracaufeu 4/102");
+    rejette("ECHANGE/VENDS Dracaufeu 4/102");
+  });
+
+  it("laisse passer une carte dont le titre dit qu'elle est recherchée", () => {
+    // `recherche` et `recherchee` sont deux mots distincts après `normalize` :
+    // le vocabulaire est étroit à dessein, sans quoi la moitié des annonces
+    // légitimes tomberait avec.
+    const match = score("Dracaufeu 4/102 carte très recherchée");
+    assert.equal(match.junk, false);
+    assert.ok(match.score >= STRONG_SCORE);
+  });
+});
+
+describe("scoreItem — une autre impression du même Pokémon", () => {
+  /**
+   * « Salamèche 98/165 » n'est pas « Salamèche 98/97 » : le dénominateur le dit
+   * explicitement. Sept annonces de ce genre affichaient jusqu'à −85 % de la
+   * cote d'une carte qu'elles ne vendaient pas.
+   *
+   * On ne les écarte pas — tomber sur une autre impression de son Pokémon est
+   * un hasard qui vaut d'être vu. On leur retire l'écart, comme le fil le fait
+   * déjà d'une enchère eBay en cours : mieux vaut un écart vide qu'un faux.
+   */
+  // `makeItem` pose un prix de 50 € et la cote du gabarit vaut 100 € : l'écart
+  // attendu est donc de −50 % quand il doit être calculé.
+  const juge = (title: string) => scoreItem(makeItem({ title }), DRACAUFEU);
+
+  it("garde l'annonce mais lui retire son écart à la cote", () => {
+    const other = juge("Dracaufeu 4/165 Expédition Wizards");
+    assert.equal(other.match.otherPrint, true);
+    assert.ok(other.match.score >= STRONG_SCORE, "l'annonce doit rester visible");
+    assert.equal(other.vsMarket, null);
+  });
+
+  it("laisse son écart à la bonne impression", () => {
+    const right = juge("Carte Pokémon Dracaufeu 4/102 Set de Base");
+    assert.equal(right.match.otherPrint, false);
+    assert.equal(right.vsMarket, -50);
+  });
+
+  it("accepte le décompte avec les cartes secrètes", () => {
+    // TCGdex publie « 102 » et « 102 » ici, mais bien souvent deux valeurs
+    // différentes — « 102 » et « 103 ». Les vendeurs emploient l'une ou
+    // l'autre, et n'en retenir qu'une ferait passer les annonces légitimes
+    // pour une autre impression.
+    const secret: CardDetail = {
+      ...DRACAUFEU,
+      set: { ...DRACAUFEU.set!, cardCount: { official: 102, total: 110 } },
+    };
+    const scored = scoreItem(makeItem({ title: "Dracaufeu 4/110 holo" }), secret);
+    assert.equal(scored.match.otherPrint, false);
+  });
+});
+
 describe("normalize", () => {
   it("efface la casse, les accents et les espaces multiples", () => {
     assert.equal(normalize("  Léviator   HOLO "), "leviator holo");

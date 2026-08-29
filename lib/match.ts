@@ -28,6 +28,18 @@ export interface MatchSignals {
   bulk: boolean;
   /** Reproduction annoncée comme telle (custom, proxy, orica…). */
   fake: boolean;
+  /**
+   * Ni une carte (peluche, protège-carte, vignette Merlin ou Topps), ni une
+   * vente (annonce d'achat au prix symbolique d'un euro). Éliminatoire.
+   */
+  junk: boolean;
+  /**
+   * Le bon numéro, mais un autre dénominateur : « Salamèche 98/165 » quand on
+   * cherche la 98/97. L'annonce reste visible — c'est une vraie carte, et du
+   * bon Pokémon — mais elle perd son écart à la cote, qui serait celui d'une
+   * autre carte.
+   */
+  otherPrint: boolean;
   score: number;
 }
 
@@ -84,6 +96,63 @@ const GRADED_WORDS = ["psa", "pca", "beckett", "bgs", "cgc", "gradee", "gradees"
  * et les plus fausses du fil.
  */
 const FAKE_WORDS = ["custom", "proxy", "orica", "fanmade", "fan made", "replique", "contrefacon"];
+
+/**
+ * Ce n'est pas une carte à jouer.
+ *
+ * Mesuré le 29 août 2026 sur le tri « Meilleures affaires » de la page
+ * d'accueil : les quinze premières annonces étaient une peluche, une vitrine de
+ * présentation vide, deux protège-cartes, quatre autocollants Merlin ou Dunkin,
+ * deux vignettes Topps, et des annonces d'achat. Aucune n'était la carte
+ * cherchée, et aucune ne pouvait l'être.
+ *
+ * Elles arrivent en tête par construction, et c'est ce qui rend le problème
+ * sérieux plutôt qu'anecdotique : un objet à 3 € rapporté à la cote d'une carte
+ * à 1 000 € affiche −100 %, un écart qu'aucune vraie occasion ne peut battre.
+ * Le bruit ne se répartit donc pas dans la liste, il se concentre exactement là
+ * où l'on regarde en premier.
+ *
+ * Les marques citées sont celles des vignettes et autocollants des années 1990
+ * — Merlin, Panini, Amada, Topps, Dunkin — qui portent le nom du Pokémon et son
+ * numéro de série, d'où la confusion avec une carte à jouer.
+ */
+const NOT_A_CARD = [
+  "peluche",
+  "figurine",
+  "porte cle",
+  "porte cles",
+  "mug",
+  "sticker",
+  "stickers",
+  "autocollant",
+  "autocollants",
+  "vignette",
+  "vignettes",
+  "merlin",
+  "panini",
+  "amada",
+  "topps",
+  "dunkin",
+  "boomer",
+  "protege carte",
+  "protege cartes",
+  "protection illustree",
+  "toploader",
+  "sleeve",
+  "sleeves",
+  "vitrine",
+];
+
+/**
+ * Ce n'est pas une vente.
+ *
+ * Quelqu'un qui *cherche* la carte publie une annonce au prix symbolique d'un
+ * euro : rapportée à une cote de 2 479 €, elle s'affiche −100 % et coiffe tout
+ * le classement. Le vocabulaire est étroit à dessein — `recherche` et non
+ * `recherchee`, que `normalize` laisse distincts, sans quoi « carte très
+ * recherchée » tomberait avec.
+ */
+const WANT_AD = ["recherche", "recherches", "echange", "echanges", "achete", "achat"];
 
 /**
  * Le trait d'union devient une espace, il n'est pas effac\u00e9.
@@ -239,6 +308,37 @@ export function scoreItem<T extends Scorable>(item: T, card: CardDetail): Scored
   const bulk = hasAny(title, BULK_WORDS);
   const fake = hasAny(title, FAKE_WORDS);
 
+  // Ni une carte, ni une vente : rien à comparer, et rien à découvrir non plus.
+  const junk = hasAny(title, NOT_A_CARD) || hasAny(title, WANT_AD);
+
+  /**
+   * Le titre porte le bon numéro, mais suivi d'un *autre* dénominateur :
+   * « Ectoplasma 94/165 » quand on cherche la 94/102. C'est une vraie carte, du
+   * bon Pokémon, mais pas celle-ci — le `165` le dit explicitement.
+   *
+   * On ne l'écarte pas : tomber sur une autre impression de son Pokémon est un
+   * hasard qui vaut d'être vu, et c'est à quoi sert un fil. On lui retire en
+   * revanche son écart à la cote, qui serait celui d'une autre carte. Même
+   * traitement que l'enchère eBay en cours, et pour la même raison : mieux vaut
+   * un écart vide qu'un écart faux, et le lecteur juge.
+   */
+  // Les deux décomptes que publie TCGdex : « 102 » pour les cartes numérotées de
+  // la série, « 103 » en comptant les secrètes. Les vendeurs emploient l'un ou
+  // l'autre, et n'en retenir qu'un ferait passer la moitié des annonces
+  // légitimes pour une autre impression.
+  const counts = [total, card.set?.cardCount?.total].filter(
+    (value): value is number => typeof value === "number",
+  );
+
+  let otherPrint = false;
+  if (local && counts.length > 0) {
+    // `String.raw` plutôt que des antislashs doublés : dans un littéral gabarit
+    // ordinaire, `\b` est le caractère retour arrière et `\d` un simple « d ».
+    // Le motif compilait donc sans erreur et ne reconnaissait jamais rien.
+    const printed = new RegExp(String.raw`\b${local}\s*[/\s-]\s*(\d+)\b`).exec(title);
+    if (printed && !counts.includes(Number(printed[1]))) otherPrint = true;
+  }
+
   let score = 0;
   if (name) score += 4;
   if (number) score += 4;
@@ -248,13 +348,23 @@ export function scoreItem<T extends Scorable>(item: T, card: CardDetail): Scored
   // Assez lourd pour faire passer une reproduction sous le seuil strict, même
   // quand son titre cite scrupuleusement le nom, le numéro et l'extension.
   if (fake) score -= 8;
+  // Le maximum atteignable étant 11, la même pénalité passe sous `WIDE_SCORE` :
+  // l'annonce ne survit pas à la collecte, elle n'est donc même pas archivée.
+  if (junk) score -= 8;
 
   const trend = card.pricing?.cardmarket?.trend ?? card.pricing?.cardmarket?.avg30 ?? null;
   const price = item.totalPrice ?? item.price;
   const vsMarket =
-    trend && trend > 0 && price !== null ? Math.round(((price - trend) / trend) * 100) : null;
+    trend && trend > 0 && price !== null && !otherPrint
+      ? Math.round(((price - trend) / trend) * 100)
+      : null;
 
-  return { ...item, match: { name, number, set, graded, bulk, fake, score }, trend, vsMarket };
+  return {
+    ...item,
+    match: { name, number, set, graded, bulk, fake, junk, otherPrint, score },
+    trend,
+    vsMarket,
+  };
 }
 
 export function scoreAll<T extends Scorable>(items: T[], card: CardDetail): Scored<T>[] {
