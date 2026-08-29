@@ -161,15 +161,23 @@ export default function Dashboard({
   const [cooldown, setCooldown] = useState(0);
 
   /**
-   * Le rafraîchissement en cours, pour pouvoir l'interrompre.
+   * Le rafraîchissement en cours, pour qu'un second clic remplace le premier
+   * au lieu de doubler les collectes.
    *
-   * Le rattrapage automatique s'annulait déjà en quittant la page ; le bouton
-   * « Actualiser », non. Ses collectes continuaient donc de partir après qu'on
-   * est passé aux Lots — et depuis que leboncoin lance un vrai collecteur, ce
-   * n'était plus seulement une requête pour rien.
+   * Volontairement **pas** annulé au démontage, à la différence du rattrapage
+   * automatique : passer aux Lots pendant une actualisation ne doit pas
+   * l'interrompre. La bascule de l'en-tête est un `Link`, donc une navigation
+   * côté client — le contexte JavaScript survit, et les collectes en cours
+   * poursuivent leur route.
+   *
+   * Rien n'est perdu en chemin non plus : chaque collecte écrit son instantané
+   * sur le disque avant de répondre. Les `setState` qui reviennent après le
+   * démontage ne servent plus à rien, mais le travail, lui, est déjà rangé — et
+   * la page d'accueil, qui se rend depuis le disque, le retrouve au retour.
    */
   const forcedRun = useRef<AbortController | null>(null);
-  useEffect(() => () => forcedRun.current?.abort(), []);
+  /** Idem pour le rattrapage automatique, remplacé quand la liste change. */
+  const catchUp = useRef<AbortController | null>(null);
 
   const staleKey = initialStaleIds.join("|");
 
@@ -251,11 +259,24 @@ export default function Dashboard({
     });
   }
 
+  /**
+   * Rattrapage des cartes périmées, au chargement de la page.
+   *
+   * L'annulation est posée à l'entrée plutôt qu'en nettoyage d'effet, et c'est
+   * la même raison que pour `refreshAll` : le nettoyage se déclenche aussi bien
+   * quand la liste change **que lorsqu'on quitte la page**, et les deux ne
+   * méritent pas le même sort. Une liste qui change rend le rattrapage en cours
+   * caduc ; passer aux Lots, non — la collecte doit poursuivre sa route, son
+   * résultat étant de toute façon écrit sur le disque avant de répondre.
+   */
   useEffect(() => {
     const ids = staleKey ? staleKey.split("|") : [];
     if (ids.length === 0) return;
 
+    catchUp.current?.abort();
     const controller = new AbortController();
+    catchUp.current = controller;
+
     let failures = 0;
 
     void pooled(ids, REFRESH_CONCURRENCY, async (cardId) => {
@@ -282,8 +303,6 @@ export default function Dashboard({
       // vrai problème, et c'est le seul cas qui mérite de rester affiché.
       if (!controller.signal.aborted && failures < ids.length) setError(null);
     });
-
-    return () => controller.abort();
   }, [staleKey]);
 
   /* --------------------------------------------------------------- dérivés */

@@ -311,14 +311,27 @@ recherches Vinted prennent une trentaine de secondes quoi qu'il arrive ; les env
 n'accélérait rien, cela occupait seulement les connexions du navigateur pour attendre plus longtemps.
 Quatre suffisent à garder la file du serveur pleine.
 
-Le bouton s'annule aussi en quittant la page, ce que seul le rattrapage automatique faisait jusqu'ici.
-Depuis que leboncoin lance un vrai collecteur, une collecte poursuivie après le départ n'est plus une
-simple requête pour rien.
+### Et une actualisation qui survit à la navigation
+
+Brider ne suffisait pas : il fallait encore que passer aux Lots n'interrompe pas ce qui était en
+cours. Les deux collectes s'annulaient au démontage du composant — le rattrapage automatique par un
+nettoyage d'effet, et le bouton par un ajout de la même veine.
+
+C'était le mauvais réflexe. Un nettoyage d'effet se déclenche aussi bien quand ses dépendances
+changent que **lorsqu'on quitte la page**, et les deux ne méritent pas le même sort : une liste de
+cartes qui change rend caduque la collecte en cours, une navigation non. L'annulation est donc posée
+à l'entrée — on remplace le passage précédent — et plus jamais en nettoyage.
+
+Rien n'est perdu en chemin : chaque collecte **écrit son instantané sur le disque avant de
+répondre**. Les `setState` qui reviennent après le démontage ne servent plus à rien, mais le travail
+est déjà rangé, et la page d'accueil — qui se rend depuis le disque — le retrouve au retour. La
+bascule de l'en-tête étant un `Link`, la navigation est côté client : le contexte JavaScript survit,
+et les requêtes en vol poursuivent leur route.
 
 Le compromis, dit franchement : les quatre premières cartes attendent ensemble le passage leboncoin
 (une quinzaine de secondes), là où elles se noyaient auparavant dans quarante-quatre collectes
 parallèles. Une actualisation complète dure donc une dizaine de secondes de plus — en échange d'une
-page qui reste navigable pendant tout ce temps.
+page qui reste navigable pendant tout ce temps, et d'une collecte qui continue sans nous.
 
 ## Ce qui est nouveau l'est vraiment
 
