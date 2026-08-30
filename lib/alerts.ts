@@ -40,12 +40,26 @@ export interface AlertGroup {
  *
  * `>` et non `>=` : le repère vaut la date du dernier envoi, et une annonce
  * découverte exactement à cet instant a déjà été annoncée.
+ *
+ * `hidden` prolonge la même règle : ce que l'utilisateur a écarté du fil à la
+ * main ne doit pas revenir lui faire vibrer le téléphone. Le cas se produit
+ * pour de bon — la veille passe au quart d'heure, et une annonce découverte
+ * puis congédiée sur le site entre deux passages serait sans cela annoncée
+ * juste après avoir été refusée.
  */
-export function selectFresh(items: FeedItem[], since: number): FeedItem[] {
+export function selectFresh(
+  items: FeedItem[],
+  since: number,
+  hidden: Record<string, number> = {},
+): FeedItem[] {
   return items
     .filter(
       (item) =>
-        item.firstSeen > since && item.score >= STRONG_SCORE && !item.graded && !item.bulk,
+        item.firstSeen > since &&
+        item.score >= STRONG_SCORE &&
+        !item.graded &&
+        !item.bulk &&
+        !(item.id in hidden),
     )
     .sort((a, b) => b.firstSeen - a.firstSeen);
 }

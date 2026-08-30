@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import HideButton from "@/components/HideButton";
 import { deviationStyle, feesLabel, postedHint, SourceChip } from "@/components/OfferRow";
 import { CONDITION_LABELS } from "@/lib/match";
 import { age, countdown, euro, percent, plural } from "@/lib/format";
@@ -27,11 +28,13 @@ export default function OfferTile({
   card,
   isNew,
   now,
+  onHide,
 }: {
   item: FeedItem;
   card: FeedCard;
   isNew: boolean;
   now: number;
+  onHide: () => void;
 }) {
   const posted = age(item.createdAt, now);
   const remaining = item.auction ? countdown(item.endsAt, now) : null;
@@ -41,7 +44,7 @@ export default function OfferTile({
 
   return (
     <li className="animate-rise">
-      <div className="flex h-full flex-col overflow-hidden rounded-lg border border-line bg-panel transition hover:border-line-strong">
+      <div className="group relative flex h-full flex-col overflow-hidden rounded-lg border border-line bg-panel transition hover:border-line-strong">
         <a
           href={item.url}
           target="_blank"
@@ -77,6 +80,11 @@ export default function OfferTile({
             </span>
           )}
         </a>
+
+        {/* Frère du lien et non son enfant : un bouton ne s'imbrique pas dans
+            une ancre. Posé en haut à droite, le seul coin de la photo que les
+            étiquettes et l'écart à la cote laissent libre. */}
+        <HideButton onClick={onHide} className="absolute right-1.5 top-1.5 h-6 w-6 text-sm" />
 
         <div className="flex min-w-0 flex-1 flex-col gap-1 p-2">
           <div className="flex items-baseline justify-between gap-2">

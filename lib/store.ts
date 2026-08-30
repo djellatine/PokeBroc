@@ -42,6 +42,22 @@ export interface User {
   /** Repère du badge « nouveau » : les annonces vues après ne l'étaient pas. */
   feedNewSince?: number;
   /**
+   * Annonces écartées du fil à la main, par identifiant (`vinted:123`), datées
+   * du geste.
+   *
+   * Un dictionnaire plutôt qu'un tableau, pour deux raisons. La première est la
+   * date, sans laquelle le plafond n'aurait rien à trancher — voir
+   * `pruneHidden`. La seconde est la lecture : la veille interroge cette liste
+   * pour *chaque* annonce de *chaque* carte suivie, et un `includes` sur mille
+   * identifiants coûterait mille comparaisons à chaque annonce.
+   *
+   * Sur le serveur et non dans `localStorage` : une annonce congédiée depuis le
+   * téléphone doit le rester sur l'ordinateur, et la veille — qui tourne dans un
+   * autre processus — doit pouvoir la lire pour ne pas annoncer sur Telegram ce
+   * qu'on vient tout juste d'écarter.
+   */
+  hidden?: Record<string, number>;
+  /**
    * Code d'appairage Telegram en attente, à envoyer au bot. Voir
    * `startTelegramLink()` — le lien lui-même vit dans `.data/veille/state.json`,
    * que la veille est seule à écrire.
@@ -240,6 +256,74 @@ export async function markFeedSeen(userId: string, now = Date.now()): Promise<vo
       user.feedNewSince = now;
       user.feedSeenAt = now;
     }
+  });
+}
+
+/* ------------------------------------------------------ annonces masquées */
+
+/**
+ * Annonces masquées conservées par compte.
+ *
+ * Sans plafond, `users.json` grossirait sans fin : un masquage est définitif,
+ * alors que l'annonce, elle, disparaît de la place de marché au bout de
+ * quelques semaines — passé quoi son identifiant ne protège plus de rien. Les
+ * plus anciennement masquées sautent donc en premier : ce sont celles dont
+ * l'annonce a le plus de chances d'être déjà vendue, et de ne jamais revenir
+ * dans le fil.
+ *
+ * Mille, c'est vingt-cinq fois ce qu'un fil affiche d'un coup : y toucher
+ * suppose d'avoir masqué mille annonces sans jamais en réafficher une.
+ */
+export const MAX_HIDDEN = 1000;
+
+/**
+ * Ramène le dictionnaire sous le plafond, en gardant les masquages les plus
+ * récents. Exporté pour les tests : une règle de rétention qui se trompe de
+ * sens ne se voit qu'au millième masquage.
+ */
+export function pruneHidden(hidden: Record<string, number>): Record<string, number> {
+  const entries = Object.entries(hidden);
+  if (entries.length <= MAX_HIDDEN) return hidden;
+  return Object.fromEntries(entries.sort(([, a], [, b]) => b - a).slice(0, MAX_HIDDEN));
+}
+
+/**
+ * Écarte une annonce du fil.
+ *
+ * Idempotent au résultat près : masquer deux fois la même annonce ne fait que
+ * redater le geste, ce qui la remet en tête face au plafond — et c'est bien ce
+ * qu'on veut, puisque c'est le signe qu'elle revient.
+ */
+export async function hideListing(
+  userId: string,
+  itemId: string,
+  at = Date.now(),
+): Promise<boolean> {
+  return transaction((db) => {
+    const user = db.users.find((entry) => entry.id === userId);
+    if (!user) return false;
+    user.hidden = pruneHidden({ ...user.hidden, [itemId]: at });
+    return true;
+  });
+}
+
+/** Rend une annonce au fil. Sans effet si elle n'y était pas. */
+export async function unhideListing(userId: string, itemId: string): Promise<boolean> {
+  return transaction((db) => {
+    const user = db.users.find((entry) => entry.id === userId);
+    if (!user) return false;
+    if (user.hidden) delete user.hidden[itemId];
+    return true;
+  });
+}
+
+/** « Tout réafficher » : le fil repart sans aucun masquage. */
+export async function unhideAllListings(userId: string): Promise<boolean> {
+  return transaction((db) => {
+    const user = db.users.find((entry) => entry.id === userId);
+    if (!user) return false;
+    delete user.hidden;
+    return true;
   });
 }
 

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import HideButton from "@/components/HideButton";
 import { CONDITION_LABELS } from "@/lib/match";
 import { age, countdown, euro, percent, plural } from "@/lib/format";
 import type { FeedCard, FeedItem } from "@/lib/feed";
@@ -84,11 +85,13 @@ export default function OfferRow({
   card,
   isNew,
   now,
+  onHide,
 }: {
   item: FeedItem;
   card: FeedCard;
   isNew: boolean;
   now: number;
+  onHide: () => void;
 }) {
   const posted = age(item.createdAt, now);
   const remaining = item.auction ? countdown(item.endsAt, now) : null;
@@ -99,26 +102,35 @@ export default function OfferRow({
   return (
     <li className="animate-rise">
       <div className="group grid grid-cols-[2.75rem_1fr] items-start gap-3 rounded-lg border border-line bg-panel p-2 transition hover:border-line-strong sm:grid-cols-[3.25rem_1fr_auto]">
-        <a
-          href={item.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          tabIndex={-1}
-          aria-hidden
-          className="block aspect-[3/4] overflow-hidden rounded bg-panel-2"
-        >
-          {item.thumbnail ? (
-            /* eslint-disable-next-line @next/next/no-img-element */
-            <img
-              src={item.thumbnail}
-              alt=""
-              loading="lazy"
-              className="h-full w-full object-cover"
-            />
-          ) : (
-            <span className="grid h-full place-items-center text-[9px] text-faint">sans photo</span>
-          )}
-        </a>
+        {/* La croix se pose au coin de la miniature, comme sur la vignette.
+            Elle déborde dans l'écart des colonnes plutôt que sur la photo : à
+            3 rem de large, une croix centrée dedans la recouvrirait. */}
+        <div className="relative">
+          <a
+            href={item.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            tabIndex={-1}
+            aria-hidden
+            className="block aspect-[3/4] overflow-hidden rounded bg-panel-2"
+          >
+            {item.thumbnail ? (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src={item.thumbnail}
+                alt=""
+                loading="lazy"
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <span className="grid h-full place-items-center text-[9px] text-faint">
+                sans photo
+              </span>
+            )}
+          </a>
+
+          <HideButton onClick={onHide} className="absolute -right-1.5 -top-1.5 h-5 w-5 text-xs" />
+        </div>
 
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">

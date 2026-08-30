@@ -351,6 +351,39 @@ La médiane plutôt que la moyenne : une gradée à 900 € déplacerait une moy
 Seules les correspondances fortes entrent dans ces statistiques. Les annonces de plus de 120 jours
 sont oubliées, et un plafond de 1500 entrées par carte borne la taille des fichiers.
 
+## Une annonce qu'on ne veut plus voir
+
+Le plafond de douze annonces par carte empêche un Dracaufeu très représenté d'occuper tout l'écran,
+mais il ne fait rien contre l'annonce unique qui, elle, ne part pas : la contrefaçon manifeste, le
+vendeur au prix fantaisiste, le lot reposté chaque semaine. Elle est bien celle de la carte suivie,
+donc la notation la retient, et elle revient à chaque passage.
+
+D'où la croix posée au coin de chaque annonce, dans les quatre affichages — fil et lots, ligne et
+vignette. Un clic, elle disparaît et ne revient plus.
+
+**Sur le serveur, pas dans `localStorage`.** Une annonce congédiée depuis le téléphone doit le rester
+sur l'ordinateur ; et surtout, la veille tourne dans un autre processus — il lui faut lire cette
+liste pour ne pas annoncer sur Telegram ce qu'on vient tout juste d'écarter. Le cas n'est pas
+théorique : elle passe au quart d'heure, et une annonce découverte puis refusée sur le site entre
+deux passages serait sans cela notifiée juste après l'avoir été.
+
+**Une seule liste pour les deux fils.** Les identifiants d'annonce partagent le même espace de noms
+(`vinted:123`, `ebay:v1|456|0`, `lbc:789`) : un lot masqué sur la page Lots l'est aussi dans le fil
+des cartes, où il pouvait remonter par la notation ordinaire. C'est la même annonce.
+
+**Le masquage se voit et se défait.** Une croix cliquée par mégarde effacerait sinon une annonce sans
+trace ni retour. Une ligne sous la barre d'outils dit combien d'annonces du fil courant sont
+masquées, avec « Annuler la dernière » et « Tout réafficher » — la même forme que les avis du seuil
+de pertinence et du drapeau français, qui disent déjà « voilà ce que vous ne voyez pas ».
+
+Le filtre s'applique **avant** tous les autres, pour qu'une annonce écartée à la main ne pèse dans
+aucun des autres compteurs : « 3 annonces au titre étranger sont masquées » promettrait sinon un
+retour qui n'aurait pas lieu.
+
+Un plafond de mille masquages par compte borne `users.json`, les plus anciens sautant en premier —
+ce sont ceux dont l'annonce a le plus de chances d'être déjà vendue, donc de ne jamais revenir. Mille,
+c'est vingt-cinq fois ce qu'un fil affiche d'un coup.
+
 ## Les alertes arrivent sans qu'on regarde
 
 Le fil ne se collectait que sous les yeux d'un visiteur : `refreshCard()` n'était appelé que depuis
@@ -381,7 +414,8 @@ par la fenêtre.
 ### Ce qui déclenche une alerte
 
 Exactement ce que le fil montre par défaut : correspondance forte (le titre cite le nom **et** le
-numéro ou l'extension), ni gradée, ni lot. Reprendre les réglages par défaut du tableau de bord
+numéro ou l'extension), ni gradée, ni lot, et pas écartée à la main. Reprendre les réglages par
+défaut du tableau de bord
 plutôt qu'en inventer d'autres est la seule façon qu'une alerte ne mène pas à une page où l'annonce
 annoncée est justement filtrée — et un lien qui ne montre rien décrédibilise le suivant.
 
@@ -930,7 +964,8 @@ app/
   connexion/, inscription/  formulaires de compte
   carte/[id]/page.tsx       fiche carte + cote + prix observés + recherche libre
   actions/auth.ts           inscription, connexion, déconnexion, plafonds
-  actions/favorites.ts      ajout / retrait, « tout marquer comme vu »
+  actions/favorites.ts      ajout / retrait d'une carte de la collection
+  actions/feed.ts           masquer / réafficher une annonce, « tout marquer comme vu »
   actions/telegram.ts       émission et annulation du code d'appairage
   alertes/page.tsx          état de la veille, appairage Telegram
   api/cards/route.ts        proxy TCGdex + préchauffage des visuels
@@ -946,17 +981,21 @@ components/
   ModeSwitch.tsx            bascule Mes cartes / Lots, dans l'en-tête
   ViewSwitch.tsx            liste ou grille, préférence partagée par les deux fils
   OfferRow.tsx              une annonce, en ligne
+  OfferTile.tsx             une annonce, en vignette (prix et écart sur la photo)
+  HideButton.tsx            la croix qui écarte une annonce, commune aux quatre affichages
+  HiddenNotice.tsx          ce qui a été masqué, « Annuler la dernière », « Tout réafficher »
   CardSearch.tsx            barre de recherche et aperçu clavier
   CollectionStrip.tsx       bandeau des cartes épinglées, qui filtre le fil
   VintedResults.tsx         recherche libre de la fiche carte
   PriceHistory.tsx          prix réellement observés sur Vinted
   CardThumb.tsx             visuel de carte, avec réessais et repli sur le nom
   usePersisted.ts           préférences d'affichage (useSyncExternalStore)
+  useHidden.ts              annonces masquées : état optimiste, retour arrière si l'écriture échoue
   TelegramLink.tsx          code d'appairage : émission, copie, lien profond
   AccountMenu.tsx, AuthForm.tsx, FavoriteButton.tsx, FocusSearchButton.tsx
 lib/
   auth.ts                   mots de passe, jetons, session
-  store.ts                  comptes, favoris, badge « nouveau », code Telegram
+  store.ts                  comptes, favoris, badge « nouveau », annonces masquées, code Telegram
   feed.ts                   instantanés du fil, collecte, fraîcheur
   lots.ts                   lots : flux récent partagé + lots par carte suivie
   sightings.ts              annonces déjà vues, statistiques de prix
@@ -981,7 +1020,7 @@ deploy/
   sauvegarde.sh             archive .data/ chaque nuit, 14 jours glissants
   Caddyfile                 reverse proxy et HTTPS automatique
   pokebroc*.service/.timer  le site et ses trois minuteries
-tests/                      node:test — match, ebay, rate-limit, sightings, format, alertes
+tests/                      node:test — match, ebay, rate-limit, sightings, format, alertes, store
                             collect/test_lbc.py — normalisation et rotation, sans réseau
 ```
 

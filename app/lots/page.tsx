@@ -21,13 +21,20 @@ export const metadata: Metadata = {
  * `requireUser` sans lire les favoris : la page ne dépend d'aucune carte suivie
  * et vaut donc d'être servie à tout compte, même neuf. Le contrôle reste, parce
  * que le montage déclenche une collecte — c'est lui qui empêche la page de
- * piloter des recherches sur les catalogues pour un visiteur anonyme.
+ * piloter des recherches sur les catalogues pour un visiteur anonyme. Le compte
+ * sert au passage à retrouver les annonces masquées, qui sont les mêmes des deux
+ * côtés du site.
  */
 export default async function LotsPage() {
-  await requireUser();
+  const user = await requireUser();
   const view = await readLotsView();
 
   return (
-    <Lots initialRecent={view.recent} recentIsStale={view.recentIsStale} serverNow={view.now} />
+    <Lots
+      initialRecent={view.recent}
+      recentIsStale={view.recentIsStale}
+      initialHidden={Object.keys(user.hidden ?? {})}
+      serverNow={view.now}
+    />
   );
 }

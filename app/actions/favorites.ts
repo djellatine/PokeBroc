@@ -3,7 +3,7 @@
 import { refresh } from "next/cache";
 import { getCurrentUser } from "@/lib/auth";
 import { refreshCard } from "@/lib/feed";
-import { addFavorite, markFeedSeen, removeFavorite } from "@/lib/store";
+import { addFavorite, removeFavorite } from "@/lib/store";
 
 export interface FavoriteResult {
   ok: boolean;
@@ -72,16 +72,6 @@ export async function dropFavorite(cardId: string): Promise<FavoriteResult> {
   if (!id) return { ok: false, error: "Carte invalide." };
 
   await removeFavorite(user.id, id);
-  refresh();
-  return { ok: true };
-}
-
-/** « Tout marquer comme vu » : remet le repère des pastilles à maintenant. */
-export async function clearNewBadges(): Promise<FavoriteResult> {
-  const user = await getCurrentUser();
-  if (!user) return { ok: false, error: "Connectez-vous d’abord." };
-
-  await markFeedSeen(user.id);
   refresh();
   return { ok: true };
 }

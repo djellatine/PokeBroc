@@ -56,6 +56,15 @@ describe("selectFresh", () => {
     );
   });
 
+  it("écarte ce que l'utilisateur a masqué à la main", () => {
+    const items = [item({ id: "vinted:1" }), item({ id: "vinted:2" })];
+    const fresh = selectFresh(items, 0, { "vinted:2": NOW });
+    assert.deepEqual(
+      fresh.map((entry) => entry.id),
+      ["vinted:1"],
+    );
+  });
+
   it("exclut l'annonce découverte à l'instant du repère, déjà annoncée", () => {
     // `>` et non `>=` : le repère vaut la date du dernier envoi.
     assert.equal(selectFresh([item({ firstSeen: NOW })], NOW).length, 0);

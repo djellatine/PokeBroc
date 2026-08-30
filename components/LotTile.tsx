@@ -1,5 +1,6 @@
 "use client";
 
+import HideButton from "@/components/HideButton";
 import { feesLabel, postedHint, SourceChip } from "@/components/OfferRow";
 import { age, countdown, euro, plural } from "@/lib/format";
 import type { LotItem } from "@/lib/lots";
@@ -23,7 +24,15 @@ import { CONDITION_LABELS } from "@/lib/match";
 /** Étiquette posée sur la photo : elle doit tenir sur n'importe quel fond. */
 const OVERLAY = "rounded px-1.5 py-px text-[9px] font-bold uppercase tracking-wide backdrop-blur";
 
-export default function LotTile({ item, now }: { item: LotItem; now: number }) {
+export default function LotTile({
+  item,
+  now,
+  onHide,
+}: {
+  item: LotItem;
+  now: number;
+  onHide: () => void;
+}) {
   const posted = age(item.createdAt, now);
   const remaining = item.auction ? countdown(item.endsAt, now) : null;
   const total = item.totalPrice ?? item.price;
@@ -32,7 +41,7 @@ export default function LotTile({ item, now }: { item: LotItem; now: number }) {
 
   return (
     <li className="animate-rise">
-      <div className="flex h-full flex-col overflow-hidden rounded-lg border border-line bg-panel transition hover:border-line-strong">
+      <div className="group relative flex h-full flex-col overflow-hidden rounded-lg border border-line bg-panel transition hover:border-line-strong">
         <a
           href={item.url}
           target="_blank"
@@ -66,6 +75,15 @@ export default function LotTile({ item, now }: { item: LotItem; now: number }) {
             </span>
           )}
         </a>
+
+        {/* Frère du lien et non son enfant : un bouton ne s'imbrique pas dans
+            une ancre. En haut à droite, le seul coin que la quantité et le prix
+            par carte laissent libre. */}
+        <HideButton
+          onClick={onHide}
+          label="Masquer ce lot"
+          className="absolute right-1.5 top-1.5 h-6 w-6 text-sm"
+        />
 
         <div className="flex min-w-0 flex-1 flex-col gap-1 p-2">
           <div className="flex items-baseline justify-between gap-2">

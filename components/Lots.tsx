@@ -1,10 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import HiddenNotice from "@/components/HiddenNotice";
+import HideButton from "@/components/HideButton";
 import LotTile from "@/components/LotTile";
 import { SourceChip, feesLabel, postedHint } from "@/components/OfferRow";
 import RefreshButton from "@/components/RefreshButton";
 import { useFrenchOnly } from "@/components/useFrenchOnly";
+import { useHidden } from "@/components/useHidden";
 import { usePersisted } from "@/components/usePersisted";
 import ViewSwitch, { LAYOUT, type View, useView } from "@/components/ViewSwitch";
 import { age, countdown, euro, plural } from "@/lib/format";
@@ -66,10 +69,13 @@ const PAGE_SIZE = 24;
 export default function Lots({
   initialRecent,
   recentIsStale,
+  initialHidden,
   serverNow,
 }: {
   initialRecent: RecentLots | null;
   recentIsStale: boolean;
+  /** Annonces déjà écartées, fil des cartes compris : c'est le même stockage. */
+  initialHidden: string[];
   serverNow: number;
 }) {
   const [prefs, updatePrefs] = usePersisted(PREFS_KEY, DEFAULT_PREFS);
@@ -94,6 +100,7 @@ export default function Lots({
         onSort={(value) => updatePrefs({ sort: value })}
         sized={prefs.sized}
         onSized={(value) => updatePrefs({ sized: value })}
+        initialHidden={initialHidden}
         serverNow={serverNow}
       />
     </section>
@@ -109,6 +116,7 @@ function LotsPanel({
   onSort,
   sized,
   onSized,
+  initialHidden,
   serverNow,
 }: {
   initial: RecentLots | null;
@@ -117,6 +125,7 @@ function LotsPanel({
   onSort: (value: LotSort) => void;
   sized: boolean;
   onSized: (value: boolean) => void;
+  initialHidden: string[];
   serverNow: number;
 }) {
   const [snapshot, setSnapshot] = useState<RecentLots | null>(initial);
@@ -128,6 +137,7 @@ function LotsPanel({
   const [limit, setLimit] = useState(PAGE_SIZE);
   const [frenchOnly] = useFrenchOnly();
   const [view, setView] = useView();
+  const hidden = useHidden(initialHidden);
   /** Secondes restantes avant de pouvoir relancer une collecte à la main. */
   const [cooldown, setCooldown] = useState(0);
 
@@ -191,9 +201,9 @@ function LotsPanel({
     }
   }
 
-  const { rows, hiddenByLanguage, hiddenBySize } = useFiltered(
+  const { rows, hiddenByLanguage, hiddenBySize, hiddenByHand } = useFiltered(
     snapshot?.items ?? [],
-    { frenchOnly, sized, sort },
+    { frenchOnly, sized, sort, hidden: hidden.ids },
   );
 
   const visible = rows.slice(0, limit);
@@ -239,6 +249,13 @@ function LotsPanel({
         hiddenBySize={hiddenBySize}
       />
 
+      <HiddenNotice
+        count={hiddenByHand}
+        hidden={hidden}
+        singular="lot masqué"
+        pluralized="lots masqués"
+      />
+
       {loading && rows.length === 0 && <Skeletons view={view} />}
 
       {rows.length > 0 && (
@@ -247,6 +264,7 @@ function LotsPanel({
           total={rows.length}
           now={serverNow}
           view={view}
+          onHide={hidden.hide}
           onMore={() => setLimit((current) => current + PAGE_SIZE)}
         />
       )}
@@ -265,15 +283,28 @@ function LotsPanel({
 /** Filtres et tri, identiques dans les deux onglets. */
 function useFiltered(
   items: LotItem[],
-  { frenchOnly, sized, sort }: { frenchOnly: boolean; sized: boolean; sort: LotSort },
+  {
+    frenchOnly,
+    sized,
+    sort,
+    hidden,
+  }: {
+    frenchOnly: boolean;
+    sized: boolean;
+    sort: LotSort;
+    hidden: ReadonlySet<string>;
+  },
 ) {
   return useMemo(() => {
     // Deux passes plutôt qu'un filtre à compteurs : les compteurs se mutaient
     // depuis une closure, ce que React interdit dans un rendu. L'ordre compte —
-    // la quantité d'abord — pour que le compteur de langue ne recense que des
-    // lots qui seraient effectivement visibles sans le drapeau.
-    const withSize = sized ? items.filter((item) => item.quantity !== null) : items;
-    const unsized = items.length - withSize.length;
+    // les masquages d'abord, la quantité ensuite — pour qu'aucun compteur ne
+    // recense un lot qui ne reviendrait pas même en levant son filtre.
+    const shown = hidden.size > 0 ? items.filter((item) => !hidden.has(item.id)) : items;
+    const byHand = items.length - shown.length;
+
+    const withSize = sized ? shown.filter((item) => item.quantity !== null) : shown;
+    const unsized = shown.length - withSize.length;
 
     const kept = frenchOnly ? withSize.filter((item) => !isForeignListing(item)) : withSize;
     const foreign = withSize.length - kept.length;
@@ -288,8 +319,13 @@ function useFiltered(
       return (a.perCard ?? Infinity) - (b.perCard ?? Infinity);
     });
 
-    return { rows: sorted, hiddenByLanguage: foreign, hiddenBySize: unsized };
-  }, [items, frenchOnly, sized, sort]);
+    return {
+      rows: sorted,
+      hiddenByLanguage: foreign,
+      hiddenBySize: unsized,
+      hiddenByHand: byHand,
+    };
+  }, [items, frenchOnly, sized, sort, hidden]);
 }
 
 /* ---------------------------------------------------------------- annexes */
@@ -408,12 +444,14 @@ function Rows({
   total,
   now,
   view,
+  onHide,
   onMore,
 }: {
   items: LotItem[];
   total: number;
   now: number;
   view: View;
+  onHide: (itemId: string) => void;
   onMore: () => void;
 }) {
   const Lot = view === "grid" ? LotTile : LotRow;
@@ -422,7 +460,7 @@ function Rows({
     <>
       <ul className={LAYOUT[view].list}>
         {items.map((item) => (
-          <Lot key={item.id} item={item} now={now} />
+          <Lot key={item.id} item={item} now={now} onHide={() => onHide(item.id)} />
         ))}
       </ul>
 
@@ -435,7 +473,15 @@ function Rows({
   );
 }
 
-function LotRow({ item, now }: { item: LotItem; now: number }) {
+function LotRow({
+  item,
+  now,
+  onHide,
+}: {
+  item: LotItem;
+  now: number;
+  onHide: () => void;
+}) {
   const posted = age(item.createdAt, now);
   const remaining = item.auction ? countdown(item.endsAt, now) : null;
   const total = item.totalPrice ?? item.price;
@@ -444,22 +490,40 @@ function LotRow({ item, now }: { item: LotItem; now: number }) {
 
   return (
     <li className="animate-rise">
-      <div className="grid grid-cols-[2.75rem_1fr] items-start gap-3 rounded-lg border border-line bg-panel p-2 transition hover:border-line-strong sm:grid-cols-[3.25rem_1fr_auto]">
-        <a
-          href={item.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          tabIndex={-1}
-          aria-hidden
-          className="block aspect-[3/4] overflow-hidden rounded bg-panel-2"
-        >
-          {item.thumbnail ? (
-            /* eslint-disable-next-line @next/next/no-img-element */
-            <img src={item.thumbnail} alt="" loading="lazy" className="h-full w-full object-cover" />
-          ) : (
-            <span className="grid h-full place-items-center text-[9px] text-faint">sans photo</span>
-          )}
-        </a>
+      <div className="group grid grid-cols-[2.75rem_1fr] items-start gap-3 rounded-lg border border-line bg-panel p-2 transition hover:border-line-strong sm:grid-cols-[3.25rem_1fr_auto]">
+        {/* Comme dans le fil des cartes : la croix se pose au coin de la
+            miniature et déborde dans l'écart des colonnes, faute de place
+            dessus. */}
+        <div className="relative">
+          <a
+            href={item.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            tabIndex={-1}
+            aria-hidden
+            className="block aspect-[3/4] overflow-hidden rounded bg-panel-2"
+          >
+            {item.thumbnail ? (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src={item.thumbnail}
+                alt=""
+                loading="lazy"
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <span className="grid h-full place-items-center text-[9px] text-faint">
+                sans photo
+              </span>
+            )}
+          </a>
+
+          <HideButton
+            onClick={onHide}
+            label="Masquer ce lot"
+            className="absolute -right-1.5 -top-1.5 h-5 w-5 text-xs"
+          />
+        </div>
 
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">

@@ -27,6 +27,7 @@ export default async function Home() {
       favorites={user.favorites}
       initialSnapshots={snapshots}
       initialStaleIds={staleCardIds(user.favorites, snapshots, visit.now)}
+      initialHidden={Object.keys(user.hidden ?? {})}
       newSince={visit.newSince}
       serverNow={visit.now}
     />

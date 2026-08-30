@@ -2,11 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
-import { clearNewBadges } from "@/app/actions/favorites";
+import { clearNewBadges } from "@/app/actions/feed";
 import CollectionStrip, { type CardCount } from "@/components/CollectionStrip";
+import HiddenNotice from "@/components/HiddenNotice";
 import OfferRow from "@/components/OfferRow";
 import OfferTile from "@/components/OfferTile";
 import { useFrenchOnly } from "@/components/useFrenchOnly";
+import { useHidden } from "@/components/useHidden";
 import { usePersisted } from "@/components/usePersisted";
 import RefreshButton from "@/components/RefreshButton";
 import ViewSwitch, { LAYOUT, useView } from "@/components/ViewSwitch";
@@ -120,12 +122,15 @@ export default function Dashboard({
   favorites,
   initialSnapshots,
   initialStaleIds,
+  initialHidden,
   newSince,
   serverNow,
 }: {
   favorites: FavoriteCard[];
   initialSnapshots: Snapshot[];
   initialStaleIds: string[];
+  /** Annonces déjà écartées du fil, lues dans `users.json`. */
+  initialHidden: string[];
   /** Les annonces vues après cette date portent la pastille « nouveau ». */
   newSince: number;
   /** Horloge du serveur, pour que le premier rendu client soit identique. */
@@ -140,6 +145,7 @@ export default function Dashboard({
   const [view, setView] = useView();
   // Piloté depuis le drapeau de l'en-tête, via le magasin de `usePersisted`.
   const [frenchOnly] = useFrenchOnly();
+  const hidden = useHidden(initialHidden);
   const [selected, setSelected] = useState<string | null>(null);
   const [limit, setLimit] = useState(PAGE_SIZE);
   const [now, setNow] = useState(serverNow);
@@ -331,7 +337,7 @@ export default function Dashboard({
   const hasMaxPrice = Number.isFinite(maxPrice) && maxPrice > 0;
 
   /** Annonces retenues, dédoublonnées et triées. Les compteurs en découlent. */
-  const { rows, counts, hiddenByThreshold, hiddenByLanguage, stats } = useMemo(() => {
+  const { rows, counts, hiddenByThreshold, hiddenByLanguage, hiddenByHand, stats } = useMemo(() => {
     const followed = new Set(favorites.map((favorite) => favorite.cardId));
 
     // La même annonce peut remonter sur deux cartes : on garde la meilleure note.
@@ -346,7 +352,16 @@ export default function Dashboard({
 
     let wideOnly = 0;
     let foreign = 0;
+    let byHand = 0;
     const kept = [...best.values()].filter((item) => {
+      // En premier, et avant même le seuil : une annonce congédiée à la main
+      // n'est plus dans le fil à aucun titre, et ne doit donc peser dans aucun
+      // des autres compteurs — sans quoi « 3 annonces au titre étranger sont
+      // masquées » promettrait un retour qui n'aurait pas lieu.
+      if (hidden.ids.has(item.id)) {
+        byHand += 1;
+        return false;
+      }
       if (item.score < threshold) {
         if (item.score >= WIDE_SCORE) wideOnly += 1;
         return false;
@@ -406,6 +421,7 @@ export default function Dashboard({
       counts,
       hiddenByThreshold: wideOnly,
       hiddenByLanguage: foreign,
+      hiddenByHand: byHand,
       stats: {
         total: scoped.length,
         fresh: scoped.filter((item) => item.firstSeen > newSince).length,
@@ -423,6 +439,7 @@ export default function Dashboard({
     hasMaxPrice,
     maxPrice,
     frenchOnly,
+    hidden.ids,
   ]);
 
   const visible = rows.slice(0, limit);
@@ -563,6 +580,13 @@ export default function Dashboard({
           </p>
         )}
 
+        <HiddenNotice
+          count={hiddenByHand}
+          hidden={hidden}
+          singular="annonce masquée"
+          pluralized="annonces masquées"
+        />
+
         {/* Affiché même quand le fil est vide : sans cette phrase, un filtre
             posé depuis l’en-tête laisserait croire à une panne de collecte. */}
         {frenchOnly && hiddenByLanguage > 0 && (
@@ -608,6 +632,7 @@ export default function Dashboard({
                     card={card}
                     isNew={item.firstSeen > newSince}
                     now={now}
+                    onHide={() => hidden.hide(item.id)}
                   />
                 );
               })}

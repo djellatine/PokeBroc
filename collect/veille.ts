@@ -36,9 +36,10 @@
  * Ce qui déclenche une alerte
  * ---------------------------
  * Exactement ce que le fil montre par défaut : correspondance forte
- * (`score >= STRONG_SCORE`), ni gradée, ni lot. Reprendre les réglages par
- * défaut du tableau de bord plutôt qu'en inventer d'autres est la seule façon
- * qu'une alerte ne mène pas à une page où l'annonce annoncée est filtrée.
+ * (`score >= STRONG_SCORE`), ni gradée, ni lot, et pas écartée à la main.
+ * Reprendre les réglages par défaut du tableau de bord plutôt qu'en inventer
+ * d'autres est la seule façon qu'une alerte ne mène pas à une page où l'annonce
+ * annoncée est filtrée.
  *
  * Usage
  * -----
@@ -269,7 +270,7 @@ async function freshFor(user: User, since: number): Promise<AlertGroup[]> {
     const snapshot = await readSnapshot(favorite.cardId);
     if (!snapshot) continue;
 
-    const items = selectFresh(snapshot.items, since);
+    const items = selectFresh(snapshot.items, since, user.hidden);
     if (items.length > 0) groups.push({ card: snapshot.card, items });
   }
 
