@@ -641,6 +641,10 @@ npm run build
 npm run lint
 ```
 
+Sous Windows, `demarrer.bat` fait la même chose d'un double-clic : il installe les dépendances au
+premier lancement, démarre `npm run dev` et ouvre le navigateur tout seul — de quoi lancer le site
+sans passer par un terminal.
+
 Aucune variable d'environnement n'est nécessaire en développement. `NEXT_PUBLIC_SITE_URL` sert au
 plan de site, `EBAY_CLIENT_ID` / `EBAY_CLIENT_SECRET` ajoutent eBay au fil, et `TELEGRAM_BOT_TOKEN`
 les alertes. Chacune est facultative : sans elle, la fonction disparaît sans rien casser.
