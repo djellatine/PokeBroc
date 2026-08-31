@@ -28,6 +28,31 @@ export interface FavoriteCard {
   localId: string | null;
   setName: string | null;
   addedAt: string;
+  /**
+   * Carte précieuse à surveiller *aussi* sur Cardmarket. Volontairement opt-in
+   * et par carte, non global : sonder Cardmarket demande un navigateur piloté
+   * (voir `collect/cardmarket.py`), trop coûteux pour l'appliquer aux dizaines
+   * de cartes épinglées. Absent vaut « non » — le champ n'existe que sur les
+   * cartes cochées, pour ne pas alourdir les autres.
+   */
+  cardmarket?: boolean;
+  /**
+   * Critères de recherche Cardmarket pour cette carte. La langue n'y figure
+   * pas : elle est toujours le français, imposée par le collecteur — un
+   * collectionneur francophone ne guette pas une carte japonaise. Seuls varient
+   * le tirage `reverse` et la `firstEd` (première édition), qui changent
+   * radicalement la cote et donc ce qu'on veut surveiller. Absent = version
+   * standard, sans reverse ni première édition.
+   */
+  cardmarketPrefs?: { reverse?: boolean; firstEd?: boolean };
+  /**
+   * Lien Cardmarket collé à la main. Le collecteur résout tout seul l'URL des
+   * cartes courantes, mais échoue sur les anciennes ou rares que la recherche
+   * ne remonte pas — cf. l'écueil déjà documenté pour leboncoin. Ce champ passe
+   * outre : quand il est là, le collecteur sonde cette page-là sans chercher.
+   * C'est la porte de sortie pour toute carte que la résolution ne trouve pas.
+   */
+  cardmarketUrl?: string;
 }
 
 export interface User {
@@ -183,6 +208,52 @@ export async function removeFavorite(userId: string, cardId: string): Promise<bo
     const user = db.users.find((entry) => entry.id === userId);
     if (!user) return false;
     user.favorites = user.favorites.filter((favorite) => favorite.cardId !== cardId);
+    return true;
+  });
+}
+
+/**
+ * Coche ou décoche une carte pour la surveillance Cardmarket, avec ses critères.
+ *
+ * Les champs sont retirés plutôt que mis à `false` quand on décoche :
+ * `cardmarket` n'existe que sur les cartes surveillées, ce qui garde
+ * `users.json` propre et fait de la liste de chasse un simple filtre de
+ * présence. De même, un critère `reverse`/`firstEd` faux n'est pas stocké — la
+ * version standard est l'absence de préférence, pas une préférence à `false`.
+ */
+export async function setCardmarketWatch(
+  userId: string,
+  cardId: string,
+  on: boolean,
+  prefs: { reverse?: boolean; firstEd?: boolean } = {},
+  url: string | null = null,
+): Promise<boolean> {
+  return transaction((db) => {
+    const user = db.users.find((entry) => entry.id === userId);
+    if (!user) return false;
+    const favorite = user.favorites.find((entry) => entry.cardId === cardId);
+    if (!favorite) return false;
+
+    if (!on) {
+      delete favorite.cardmarket;
+      delete favorite.cardmarketPrefs;
+      // Le lien collé, lui, survit à un décochage : le retrouver a coûté un
+      // aller sur Cardmarket, et la carte reste épinglée. Le retirer forcerait
+      // à le recoller au prochain suivi.
+      return true;
+    }
+
+    favorite.cardmarket = true;
+    const kept: { reverse?: boolean; firstEd?: boolean } = {};
+    if (prefs.reverse) kept.reverse = true;
+    if (prefs.firstEd) kept.firstEd = true;
+    if (Object.keys(kept).length > 0) favorite.cardmarketPrefs = kept;
+    else delete favorite.cardmarketPrefs;
+
+    // `null` laisse le lien tel quel ; chaîne vide l'efface ; sinon on pose la
+    // valeur fournie (déjà validée par l'appelant).
+    if (url === "") delete favorite.cardmarketUrl;
+    else if (url !== null) favorite.cardmarketUrl = url;
     return true;
   });
 }

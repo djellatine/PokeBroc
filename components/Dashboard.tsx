@@ -125,6 +125,7 @@ export default function Dashboard({
   initialHidden,
   newSince,
   serverNow,
+  cardmarketWarning,
 }: {
   favorites: FavoriteCard[];
   initialSnapshots: Snapshot[];
@@ -135,6 +136,8 @@ export default function Dashboard({
   newSince: number;
   /** Horloge du serveur, pour que le premier rendu client soit identique. */
   serverNow: number;
+  /** Pourquoi Cardmarket est vide, quand il l'est — voir `cardmarketWarning`. */
+  cardmarketWarning: string | null;
 }) {
   const [snapshots, setSnapshots] = useState<Record<string, Snapshot>>(() =>
     Object.fromEntries(initialSnapshots.map((snapshot) => [snapshot.card.cardId, snapshot])),
@@ -339,6 +342,13 @@ export default function Dashboard({
   /** Annonces retenues, dédoublonnées et triées. Les compteurs en découlent. */
   const { rows, counts, hiddenByThreshold, hiddenByLanguage, hiddenByHand, stats } = useMemo(() => {
     const followed = new Set(favorites.map((favorite) => favorite.cardId));
+    // Cartes actuellement surveillées sur Cardmarket. Décocher « CM » retire la
+    // carte de cet ensemble, et ses offres Cardmarket disparaissent aussitôt du
+    // fil — sans attendre que le collecteur réécrive l'instantané, qui les porte
+    // encore. C'est le pendant de la case cochée, appliqué à la lecture.
+    const cardmarketWatched = new Set(
+      favorites.filter((favorite) => favorite.cardmarket).map((favorite) => favorite.cardId),
+    );
 
     // La même annonce peut remonter sur deux cartes : on garde la meilleure note.
     const best = new Map<string, FeedItem>();
@@ -362,6 +372,11 @@ export default function Dashboard({
         byHand += 1;
         return false;
       }
+      // Offre Cardmarket d'une carte qu'on ne surveille plus : congédiée avant
+      // tout compteur, elle n'a plus à figurer nulle part.
+      if (item.source === "cardmarket" && !cardmarketWatched.has(item.cardId)) {
+        return false;
+      }
       if (item.score < threshold) {
         if (item.score >= WIDE_SCORE) wideOnly += 1;
         return false;
@@ -371,8 +386,12 @@ export default function Dashboard({
       if (filters.onlyNew && item.firstSeen <= newSince) return false;
       if (hasMaxPrice && (item.totalPrice ?? item.price ?? Infinity) > maxPrice) return false;
       // En dernier, pour que le compteur ne recense que des annonces qui
-      // seraient effectivement visibles sans le drapeau.
-      if (frenchOnly && isForeignListing(item)) {
+      // seraient effectivement visibles sans le drapeau. Cardmarket y échappe :
+      // c'est un marché paneuropéen intégré où acheter en Italie ou aux Pays-Bas
+      // est la norme, port compris — rien à voir avec une petite annonce
+      // étrangère sur Vinted, que le drapeau vise. Le filtrer viderait la source
+      // de ses offres, qui sont européennes par nature.
+      if (frenchOnly && item.source !== "cardmarket" && isForeignListing(item)) {
         foreign += 1;
         return false;
       }
@@ -391,7 +410,13 @@ export default function Dashboard({
     const scoped = selected ? kept.filter((item) => item.cardId === selected) : kept;
 
     const sorted = [...scoped].sort((a, b) => {
-      if (filters.sort === "date") return (b.createdAt ?? 0) - (a.createdAt ?? 0);
+      // Cardmarket ne date pas ses offres (`createdAt` nul) : sans repli, elles
+      // s'entasseraient tout en bas du tri par date. On retombe alors sur
+      // `firstSeen`, la première fois qu'on a croisé l'offre — ce qui est
+      // justement la date qu'on veut pour une « nouveauté ».
+      if (filters.sort === "date") {
+        return (b.createdAt ?? b.firstSeen) - (a.createdAt ?? a.firstSeen);
+      }
       if (filters.sort === "price") {
         return (a.totalPrice ?? a.price ?? Infinity) - (b.totalPrice ?? b.price ?? Infinity);
       }
@@ -570,6 +595,18 @@ export default function Dashboard({
         {partial.length > 0 && (
           <p className="text-[11px] text-faint">
             Fil incomplet — {partial.join(" · ")}
+          </p>
+        )}
+
+        {cardmarketWarning && (
+          <p
+            role="status"
+            className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-300"
+          >
+            {cardmarketWarning}{" "}
+            <Link href="/cardmarket" className="font-semibold underline">
+              Ouvrir la page Cardmarket
+            </Link>
           </p>
         )}
 

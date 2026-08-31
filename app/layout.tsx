@@ -70,6 +70,10 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <footer className="border-t border-line px-4 py-5 text-center text-[11px] text-faint">
           Cartes et cotes : TCGdex · Cardmarket — Annonces : Vinted. Projet personnel, sans
           affiliation.
+          <br />
+          <Link href="/cardmarket" className="text-dim underline transition hover:text-text">
+            Surveiller une carte sur Cardmarket
+          </Link>
         </footer>
       </body>
     </html>

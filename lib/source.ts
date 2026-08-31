@@ -13,7 +13,7 @@
  * cohabiter avec ce qui lit le disque.
  */
 
-export type Source = "vinted" | "ebay" | "lbc";
+export type Source = "vinted" | "ebay" | "lbc" | "cardmarket";
 
 /**
  * Nom d'affichage d'une place de marché.
@@ -27,4 +27,5 @@ export const SOURCE_NAMES: Record<Source, string> = {
   vinted: "Vinted",
   ebay: "eBay",
   lbc: "leboncoin",
+  cardmarket: "Cardmarket",
 };

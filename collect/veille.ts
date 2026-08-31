@@ -57,6 +57,7 @@ import path from "node:path";
 import { compose, isPermanentFailure, selectFresh, type AlertGroup } from "../lib/alerts";
 import { readSnapshot, refreshCard } from "../lib/feed";
 import { plural } from "../lib/format";
+import { refreshCardmarketSweep, writeCardmarketWatched } from "../lib/cardmarket";
 import { readJson, writeJson } from "../lib/json-file";
 import { writeLbcQueries } from "../lib/lbc";
 import {
@@ -235,6 +236,24 @@ async function sweep(startedAt: number, options: Options): Promise<{ cards: numb
     if (!options.quiet) console.error(`  ${queries.length} requêtes leboncoin déposées`);
   } catch (error) {
     errors.push(`requêtes leboncoin : ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  // La liste de chasse Cardmarket, déposée au même endroit et pour la même
+  // raison : le collecteur piloté par navigateur la relira pour résoudre puis
+  // sonder les cartes cochées « précieuse ». Un échec ne doit pas emporter le
+  // balayage.
+  try {
+    const watched = await writeCardmarketWatched(cards);
+    if (!options.quiet) console.error(`  ${watched.length} cartes suivies sur Cardmarket`);
+
+    // Puis on relève ces cartes en un seul lancement de navigateur, avant la
+    // boucle par carte qui suit : `refreshCard` y lira le `cartes.json` frais
+    // que ce balayage vient d'écrire, et les alertes partiront sur ce qui est
+    // neuf. Une fois pour toutes les cartes, pas une fois par carte — c'est ce
+    // qui fait de la veille la minuterie de Cardmarket. Ne lève jamais.
+    if (watched.length > 0) await refreshCardmarketSweep();
+  } catch (error) {
+    errors.push(`liste Cardmarket : ${error instanceof Error ? error.message : String(error)}`);
   }
 
   for (const [index, favorite] of cards.entries()) {

@@ -499,8 +499,36 @@ pour un fichier de 18 Ko**, des `502` par salves, et des requêtes qui n'aboutis
   cookies de session anonyme : `lib/vinted.ts` en ouvre une en visitant la page d'accueil, la garde
   ~9 minutes en mémoire et la renouvelle automatiquement sur un `401`. Les appels sortants sont
   sérialisés (350 ms minimum entre deux) et les résultats mis en cache 90 secondes.
-- **Lots leboncoin** : collectés par `collect/lbc.py`, hors du site. Voir ci-dessous — c'est la seule
-  source que le serveur ne peut pas interroger lui-même.
+- **Lots leboncoin** : collectés par `collect/lbc.py`, hors du site. Voir ci-dessous.
+- **Offres Cardmarket** : collectées par `collect/cardmarket.py`, hors du site, pour les seules cartes
+  cochées « précieuse » (bouton **CM** du bandeau de collection). Voir ci-dessous et la page d'aide
+  `/cardmarket`.
+
+### Pourquoi Cardmarket passe par un navigateur piloté
+
+Cardmarket est derrière Cloudflare, qui sert un défi JavaScript à toute requête sans laissez-passer.
+Mesuré le 31 août 2026 : le `fetch` de Node comme `curl_cffi` — l'arme qui suffit pour Datadome —
+reçoivent le défi. En rejouant le cookie `cf_clearance` d'un vrai Edge, `curl_cffi` obtient 200
+quelques requêtes puis 403 : le cookie est lié à l'empreinte TLS **d'Edge**, non à celle de Chrome
+qu'il imite. Seul un vrai navigateur passe de façon stable. `collect/cardmarket.py` **lance donc son
+propre Edge** (Playwright, profil persistant `.data/cardmarket/profil` qui garde le `cf_clearance`),
+fenêtre **hors écran** par défaut — invisible, mais bien meilleur que *headless* face à Cloudflare —
+et `--visible` quand un défi doit être levé à la main. Aucun script ne coche un CAPTCHA : au premier
+usage ou après un durcissement, `python collect/cardmarket.py --visible --resolve` une fois.
+
+Le blocage de Cloudflare est **fonction du volume** (`navigator.webdriver` reste `false` : ce n'est
+pas une détection d'automatisation) ; une cadence douce le tient à distance, un marathon de requêtes
+le réveille. D'où la minuterie au quart d'heure et le champ `status.json`, que le site lit pour
+afficher un bandeau « collecte bloquée » plutôt qu'un fil vide sans explication (`cardmarketWarning`).
+
+Cette collecte ne peut tourner que sur une machine à Edge et IP résidentielle — jamais sur le serveur
+Linux, où `CARDMARKET_PYTHON` est absent et le balayage de la veille reste un no-op. Sous Windows, la
+tâche planifiée `PokeBroc Cardmarket` la relance toutes les 15 min ; `collecte-cardmarket.bat` en est
+le lanceur.
+
+L'**API officielle** aurait été plus propre (30 000 requêtes/jour), mais elle est réservée aux
+vendeurs professionnels et n'accepte plus de nouvelles demandes (vérifié le 31 août 2026) : le
+scraping reste la seule voie, assumée fragile.
 
 ### Pourquoi leboncoin passe par un script Python
 

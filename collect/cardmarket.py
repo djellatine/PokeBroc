@@ -1,0 +1,710 @@
+#!/usr/bin/env python3
+"""
+Collecteur Cardmarket — le second morceau du projet en Python, pour une raison
+cousine de celle de `collect/lbc.py`, mais pas identique.
+
+Pourquoi un script séparé, et pourquoi un navigateur
+----------------------------------------------------
+Cardmarket est derrière Cloudflare, qui sert un défi JavaScript (« Just a
+moment… ») à toute requête sans laissez-passer. Deux mesures, faites le 31 août
+2026, ont tranché l'approche :
+
+- le `fetch` de Node, comme un `curl` nu, reçoit le défi : 403 systématique ;
+- `curl_cffi` avec l'empreinte Chrome — l'arme qui suffit pour Datadome sur
+  leboncoin — **ne suffit pas ici**. En rejouant le cookie `cf_clearance` d'un
+  vrai navigateur, il obtient bien 200… pendant quelques requêtes, puis 403. Le
+  cookie de Cloudflare est lié à l'empreinte TLS *d'Edge* qui l'a résolu, là où
+  `curl_cffi` présente celle de Chrome : Cloudflare l'accepte le temps de
+  quelques appels, puis le rejette.
+
+Le navigateur, lui, passe de façon stable : c'est *son* empreinte qui a résolu
+le défi, et il renouvelle le cookie tout seul. D'où ce collecteur piloté par
+Edge, là où leboncoin se contente de `curl_cffi`.
+
+Le collecteur **lance son propre Edge**, sur un profil à lui
+(`.data/cardmarket/profil`) persistant d'un passage à l'autre, où se garde le
+`cf_clearance` de Cloudflare. Par défaut la fenêtre est **hors écran** :
+invisible, mais un vrai navigateur, qui passe Cloudflare bien mieux qu'un mode
+*headless*. `--visible` la ramène à l'écran, pour le seul cas où un défi doit
+être levé à la main — aucun script ne coche un CAPTCHA à ta place. Un verrou
+(`collect.lock`) empêche deux collecteurs de se disputer le profil.
+
+Amorçage : au tout premier usage, ou quand Cloudflare a durci, lancer une fois
+`python collect/cardmarket.py --visible --resolve` et lever le défi à la main
+dans la fenêtre ; le `cf_clearance` obtenu sert ensuite les passages invisibles.
+
+Deux modes, une raison de les séparer
+-------------------------------------
+- **sondage** (défaut) : pour chaque carte dont on connaît déjà l'URL produit,
+  relever les offres. C'est la valeur quotidienne, et c'est fiable : une URL
+  produit canonique se charge sans faute.
+- **résolution** (`--resolve`) : retrouver l'URL produit d'une carte à partir de
+  son nom anglais et de son numéro. C'est fragile — l'endpoint de recherche est
+  le plus protégé de Cardmarket, et une carte ancienne ne remonte pas en page 1
+  d'une recherche générique (même écueil que les cartes rares sur leboncoin,
+  cf. l'en-tête de `lib/lbc.ts`). On ne le paie donc qu'**une fois par carte**,
+  et le résultat est mis en cache dans `produits.json`. Une carte non résolue se
+  corrige à la main plutôt que de bloquer le sondage des autres.
+
+Ce que le script ne fait pas
+----------------------------
+Aucune notation, aucun calcul d'écart, aucune détection de « nouveauté » : tout
+cela vit en TypeScript, où `lib/cardmarket.ts` lira `cartes.json` et où
+`recordSightings` datera chaque `idArticle` inconnu — c'est de là que naîtront
+les alertes, sans une ligne de plus ici. Le script dépose les offres brutes, et
+rien d'autre. C'est le même partage qu'entre `collect/lbc.py` et `lib/lbc.ts`.
+
+Ce qu'il produit
+----------------
+`.data/cardmarket/cartes.json` : par carte, les offres relevées et la date du
+relevé. Format jumeau de `cartes.json` de leboncoin, pour que
+`lib/cardmarket.ts` le lise comme `lib/lbc.ts` lit le sien.
+
+Fichiers
+--------
+    .data/cardmarket/produits.json   cardId -> {url, idProduct}   (cache de résolution)
+    .data/cardmarket/cartes.json     cardId -> {at, url, items}   (offres relevées)
+    .data/cardmarket/collect.log     trace d'exécution
+
+Usage
+-----
+    python collect/cardmarket.py                    # sonde la liste de chasse
+    python collect/cardmarket.py --cards ex9-15      # ne sonde que ces cartes
+    python collect/cardmarket.py --resolve           # résout les cartes sans URL
+    python collect/cardmarket.py --visible --resolve # fenêtre visible : lever un défi
+    python collect/cardmarket.py --dry-run           # n'écrit rien, résume
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import sys
+import time
+import urllib.request
+import uuid
+from datetime import datetime
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+try:
+    from playwright.sync_api import sync_playwright
+except ImportError:  # pragma: no cover - dépend de l'environnement
+    sys.exit("playwright manquant : pip install playwright")
+
+# Comme `lbc.py`, ce script hérite sous le planificateur d'une sortie en cp1252,
+# où les accents et les drapeaux des titres n'existent pas. Un
+# `UnicodeEncodeError` tuerait la collecte après l'avoir menée à bien ; on
+# remplace plutôt que d'échouer.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
+PARIS = ZoneInfo("Europe/Paris")
+
+# Au-delà, un verrou est tenu pour mort : le processus qui le posait a dû être
+# tué sans le libérer. Large, car un tour de collecte à froid (résolution
+# comprise) peut durer.
+LOCK_STALE_S = 300
+
+# La langue est toujours le français : un collectionneur francophone ne guette
+# pas une carte japonaise ou anglaise. `language=2` est l'identifiant du français
+# chez Cardmarket (1=anglais, 2=français, 3=allemand…). Ce n'est pas un choix
+# offert à l'utilisateur, c'est une constante.
+LANGUAGE_FR = "language=2"
+
+# Un filtre par pays du vendeur (`sellerCountry`, France) a été essayé puis
+# retiré : sur une carte comme `ex9-15`, il vidait la page de ses offres
+# néerlandaises, italiennes ou belges — c'est-à-dire les affaires mêmes qu'on
+# veut voir. Cardmarket est un marché paneuropéen intégré ; on garde tous les
+# pays, on impose seulement la langue.
+
+
+def product_params(reverse: bool = False, first_ed: bool = False) -> str:
+    """La chaîne de requête d'une page produit : français toujours, plus les
+    critères choisis carte par carte.
+
+    `isReverseHolo` et `isFirstEd` sont les filtres que Cardmarket expose dans
+    l'URL de la page produit. Reverse et première édition changent radicalement
+    la cote — surveiller « le Dracaufeu » sans préciser lequel n'aurait pas de
+    sens — d'où le choix laissé à l'utilisateur, contrairement à la langue.
+    """
+    parts = [LANGUAGE_FR]
+    if reverse:
+        parts.append("isReverseHolo=Y")
+    if first_ed:
+        parts.append("isFirstEd=Y")
+    return "&".join(parts)
+
+# Entre deux pages. Cardmarket tolère un navigateur qui lit des fiches produit
+# l'une après l'autre ; c'est la *recherche* enchaînée qui se fait throttler.
+# Deux secondes suffisent au sondage.
+THROTTLE_S = 2.0
+TIMEOUT_MS = 45000
+
+# Le rendu du tableau d'offres est fait à l'ouverture de la page, pas par un
+# appel réseau différé : un court répit après `domcontentloaded` suffit à le
+# laisser peupler. Mesuré à ~2 s ; on prend une marge.
+SETTLE_MS = 2500
+
+LOG_LINES = 200
+
+# Les codes d'état de Cardmarket, dans l'ordre décroissant. Repris tels quels
+# dans `cartes.json` : la traduction vers les quatre niveaux du site est une
+# règle métier, elle vit en TypeScript avec les autres (`lib/cardmarket.ts`).
+CONDITION_CODES = {"MT", "NM", "EX", "GD", "LP", "PL", "PO"}
+
+
+def data_dir() -> Path:
+    """`.data/cardmarket/` à la racine du dépôt, créé au besoin."""
+    root = Path(__file__).resolve().parent.parent
+    return root / ".data" / "cardmarket"
+
+
+def read_json(source: Path):
+    """Lecture tolérante à l'absence : un cache qui n'existe pas encore est le
+    cas normal du premier passage, pas une erreur."""
+    try:
+        return json.loads(source.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def write_atomic(target: Path, payload) -> None:
+    """Écriture par fichier temporaire puis renommage — même garantie que
+    `writeJson` côté TypeScript : le site lit ce fichier pendant que la minuterie
+    le réécrit, et ne doit jamais tomber sur un JSON tronqué."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(f".{uuid.uuid4()}.tmp")
+    try:
+        tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, target)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+class Lock:
+    """Verrou par fichier, pour qu'un seul collecteur tourne à la fois.
+
+    La minuterie et le déclencheur du site peuvent partir en même temps ; deux
+    Edge sur le même profil se refusent. Un fichier suffit : sa présence dit
+    qu'un collecteur travaille. Un verrou plus vieux que `LOCK_STALE_S` est tenu
+    pour abandonné (processus tué) et repris — sans quoi un plantage bloquerait
+    toute collecte jusqu'au prochain redémarrage.
+    """
+
+    def __init__(self, path: Path):
+        self._path = path
+        self._held = False
+
+    def acquire(self) -> bool:
+        try:
+            if self._path.exists() and time.time() - self._path.stat().st_mtime < LOCK_STALE_S:
+                return False
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            self._path.write_text(str(os.getpid()), encoding="utf-8")
+            self._held = True
+            return True
+        except OSError:
+            # Faute de pouvoir poser le verrou, mieux vaut laisser passer que
+            # bloquer : au pire deux collectes se gênent une fois.
+            return True
+
+    def release(self) -> None:
+        if self._held:
+            self._path.unlink(missing_ok=True)
+            self._held = False
+
+
+def journal(message: str) -> None:
+    """Trace d'exécution, à côté des instantanés. Un journal qui échoue n'a
+    jamais de raison de faire échouer une collecte réussie."""
+    log = data_dir() / "collect.log"
+    stamp = datetime.now(PARIS).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        log.parent.mkdir(parents=True, exist_ok=True)
+        previous = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+        kept = (previous + [f"{stamp}  {message}"])[-LOG_LINES:]
+        log.write_text("\n".join(kept) + "\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
+# JavaScript exécuté dans la page produit pour en extraire les offres. Gardé
+# ici, au plus près du balisage qu'il connaît : le tableau `#table` empile des
+# lignes `.article-row` dont l'`id` (`articleRow<idArticle>`) porte l'unique
+# clé stable d'une offre — c'est elle qui, inconnue au sondage suivant, signera
+# une offre neuve. Le prix, le vendeur, l'état et le pays sont lus dans la même
+# ligne ; les sélecteurs doublés couvrent les deux gabarits (bureau / mobile)
+# que Cardmarket sert selon la largeur.
+EXTRACT_JS = r"""() => {
+  const rows = [...document.querySelectorAll('#table .article-row')];
+  const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
+  return rows.map((r) => {
+    const idArticle = r.id.replace('articleRow', '');
+    const price = clean(
+      r.querySelector('.price-container .color-primary')?.textContent ||
+      r.querySelector('.mobile-offer-container .color-primary')?.textContent
+    );
+    const seller = clean(r.querySelector('.seller-name a')?.textContent);
+    const condEl = r.querySelector('a.article-condition span, a.article-condition, .article-condition span');
+    const cond = clean(condEl?.textContent);
+    // Le drapeau du pays et la réputation du vendeur portent tous deux une
+    // bulle : on ne retient que celle qui commence par « Localisation », sans
+    // quoi on récolte « 15004 Ventes | 32496 Articles » à la place du pays.
+    let country = '';
+    for (const el of r.querySelectorAll('[data-bs-original-title], [aria-label], [title]')) {
+      const tip = el.getAttribute('data-bs-original-title') || el.getAttribute('aria-label') || el.getAttribute('title') || '';
+      if (/localisation/i.test(tip)) { country = clean(tip); break; }
+    }
+    return { idArticle, price, seller, cond, country };
+  });
+}"""
+
+
+def parse_price(raw: str) -> float | None:
+    """`'0,19 €'` vers `0.19`. Cardmarket écrit la virgule décimale et le point
+    des milliers à la française ; on retire tout sauf les chiffres et la virgule
+    finale."""
+    if not raw:
+        return None
+    m = re.search(r"(\d[\d.\s]*),(\d{2})", raw)
+    if not m:
+        return None
+    entier = re.sub(r"[.\s]", "", m.group(1))
+    try:
+        return float(f"{entier}.{m.group(2)}")
+    except ValueError:
+        return None
+
+
+def clean_country(raw: str) -> str | None:
+    """La bulle du drapeau est « Localisation de l'article: Pays-Bas » : on ne
+    garde que le pays."""
+    if not raw:
+        return None
+    return raw.split(":")[-1].strip() or None
+
+
+def normalize_offer(raw: dict, product_url: str) -> dict | None:
+    """Une offre brute de la page vers la forme que `lib/cardmarket.ts`
+    consomme. Rejette une offre sans identifiant : le reste du pipeline le
+    suppose, et une entrée mutilée coûterait plus cher à filtrer en aval."""
+    id_article = (raw.get("idArticle") or "").strip()
+    if not id_article:
+        return None
+    cond = (raw.get("cond") or "").strip().upper()
+    return {
+        "idArticle": id_article,
+        "price": parse_price(raw.get("price") or ""),
+        # L'offre n'a pas d'URL propre : l'achat se fait sur la page produit,
+        # où le panier connaît l'article. On y renvoie.
+        "url": product_url,
+        "condition": cond if cond in CONDITION_CODES else None,
+        "country": clean_country(raw.get("country") or ""),
+        "seller": raw.get("seller") or None,
+    }
+
+
+class Browser:
+    """Le navigateur que le collecteur lance et possède.
+
+    Il n'y a plus d'Edge à ouvrir à la main : le collecteur démarre le sien sur
+    un profil à lui, persistant d'un passage à l'autre. Ce profil garde le
+    laissez-passer de Cloudflare (`cf_clearance`), obtenu une fois, réutilisé
+    tant qu'il est valide.
+
+    Par défaut la fenêtre est **hors écran** (`--window-position` très négatif) :
+    un vrai Edge, qui passe Cloudflare bien mieux qu'un navigateur *headless*,
+    mais invisible. `visible=True` la ramène à l'écran, pour le seul cas où il
+    faut lever un défi à la main — aucun script ne coche un CAPTCHA à ta place.
+    """
+
+    def __init__(self, visible: bool = False, headless: bool = False):
+        self._play = sync_playwright().start()
+        profile = data_dir() / "profil"
+        profile.mkdir(parents=True, exist_ok=True)
+
+        args: list[str] = []
+        if not visible and not headless:
+            # Hors du bureau visible, sans être headless : le compromis
+            # « invisible mais crédible » face à Cloudflare.
+            args.append("--window-position=-2400,-2400")
+
+        try:
+            self._ctx = self._play.chromium.launch_persistent_context(
+                user_data_dir=str(profile),
+                channel="msedge",
+                headless=headless,
+                args=args,
+                viewport={"width": 1280, "height": 900},
+            )
+        except Exception as error:
+            self._play.stop()
+            raise RuntimeError(
+                f"Impossible de lancer Edge ({error}). Edge est-il installé, "
+                f"et le profil `{profile}` n'est-il pas déjà ouvert ailleurs ?"
+            ) from error
+        self._page = self._ctx.pages[0] if self._ctx.pages else self._ctx.new_page()
+
+    def fetch_offers(self, url: str) -> tuple[list[dict], bool]:
+        """Les offres brutes d'une page produit, et si Cloudflare a défié.
+
+        Le défi est signalé plutôt que levé : une page défiée n'est pas une
+        panne du script mais un cookie à renouveler, décision qui revient à
+        l'appelant — comme un 403 Datadome pour leboncoin.
+        """
+        # Cloudflare sert parfois son défi à la première navigation, puis le
+        # résout de lui-même : quelques tentatives après un répit tombent sur la
+        # vraie page. On ne signale le défi que s'il persiste. Deux ré-essais
+        # plutôt qu'un : un seul ne suffisait pas sur certaines pages anciennes.
+        self._page.goto(url, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
+        self._page.wait_for_timeout(SETTLE_MS)
+        for _ in range(2):
+            if not self._is_challenge():
+                break
+            self._page.wait_for_timeout(4000)
+            self._page.goto(url, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
+            self._page.wait_for_timeout(SETTLE_MS)
+        if self._is_challenge():
+            return [], True
+        return self._page.evaluate(EXTRACT_JS), False
+
+    def _is_challenge(self) -> bool:
+        """Vrai si la page est l'écran d'attente de Cloudflare.
+
+        Le titre varie selon la langue — « Just a moment… » en anglais, « Un
+        instant… » en français — et c'était le piège : ne guetter que l'anglais
+        laissait passer le défi français pour une vraie page vide, d'où des
+        « 0 offre » trompeurs. On teste donc les deux titres et le script de
+        défi que Cloudflare injecte dans tous les cas.
+        """
+        title = (self._page.title() or "").lower()
+        if "just a moment" in title or "un instant" in title:
+            return True
+        return "challenge-platform" in self._page.content()
+
+    def product_links(self, query: str) -> list[str]:
+        """Les liens produit d'une page de recherche, dédupliqués dans l'ordre.
+
+        Réservé à la résolution. Attendre le sélecteur plutôt qu'un délai fixe :
+        la page de recherche peuple sa grille en différé, et un délai trop court
+        rendait zéro lien là où il y en avait trente.
+        """
+        url = (
+            "https://www.cardmarket.com/fr/Pokemon/Products/Search"
+            f"?searchString={query.replace(' ', '+')}"
+        )
+        self._page.goto(url, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
+        try:
+            self._page.wait_for_selector(
+                "a[href*='/Products/Singles/']", timeout=12000
+            )
+        except Exception:
+            return []
+        seen: dict[str, None] = {}
+        for a in self._page.query_selector_all("a[href*='/Products/Singles/']"):
+            href = a.get_attribute("href")
+            if href:
+                seen.setdefault(href.split("?")[0], None)
+        return list(seen)
+
+    def close(self) -> None:
+        try:
+            self._ctx.close()
+        finally:
+            self._play.stop()
+
+
+def full_url(path_or_url: str, reverse: bool = False, first_ed: bool = False) -> str:
+    """Un chemin `/fr/Pokemon/...` ou une URL complète vers une URL de sondage,
+    en français et selon les critères de la carte."""
+    base = path_or_url
+    if base.startswith("/"):
+        base = "https://www.cardmarket.com" + base
+    sep = "&" if "?" in base else "?"
+    return f"{base}{sep}{product_params(reverse, first_ed)}"
+
+
+# ------------------------------------------------------------------- sondage
+
+
+def poll(
+    browser: Browser,
+    produits: dict,
+    wanted: list[str],
+    options_by_id: dict,
+    verbose: bool,
+) -> tuple[dict, list[str]]:
+    """Relève les offres de chaque carte demandée dont l'URL est connue.
+
+    Chaque carte est sondée en français, et selon ses critères propres (reverse,
+    première édition) tirés de la liste de chasse. Rend le dictionnaire des
+    cartes relevées et la liste des ennuis. Une carte défiée par Cloudflare est
+    comptée comme un ennui mais n'interrompt pas les suivantes : le cookie se
+    renouvellera, et un relevé partiel vaut mieux que pas de relevé.
+    """
+    cards: dict[str, dict] = {}
+    problems: list[str] = []
+    now = int(time.time() * 1000)
+
+    for card_id in wanted:
+        opts = options_by_id.get(card_id) or {}
+        # Le lien collé à la main l'emporte sur l'URL résolue : c'est la porte de
+        # sortie pour les cartes que la recherche ne trouve pas.
+        base = opts.get("url") or (produits.get(card_id) or {}).get("url")
+        if not base:
+            continue
+        url = full_url(base, bool(opts.get("reverse")), bool(opts.get("firstEd")))
+        try:
+            raw, challenged = browser.fetch_offers(url)
+        except Exception as error:  # noqa: BLE001 - une page ne doit pas tout perdre
+            problems.append(f"{card_id} : {type(error).__name__}")
+            continue
+        if challenged:
+            problems.append(f"{card_id} : défi Cloudflare")
+            if verbose:
+                print(f"  {card_id} : défi Cloudflare", file=sys.stderr)
+            time.sleep(THROTTLE_S)
+            continue
+
+        offers = [o for o in (normalize_offer(r, url) for r in raw) if o]
+        cards[card_id] = {"at": now, "url": url, "items": offers}
+        if verbose:
+            cheapest = min((o["price"] for o in offers if o["price"]), default=None)
+            tail = f", dès {cheapest:.2f} EUR" if cheapest else ""
+            print(f"  {card_id} : {len(offers)} offres{tail}", file=sys.stderr)
+        time.sleep(THROTTLE_S)
+
+    return cards, problems
+
+
+# --------------------------------------------------------------- résolution
+
+
+def english_card(card_id: str) -> tuple[str | None, str | None]:
+    """Nom et set anglais d'une carte, via TCGdex. Cardmarket est en anglais :
+    chercher « Dracolosse » n'y rend rien, « Dragonite » si."""
+    try:
+        with urllib.request.urlopen(
+            f"https://api.tcgdex.net/v2/en/cards/{card_id}", timeout=15
+        ) as response:
+            card = json.load(response)
+            return card.get("name"), (card.get("set") or {}).get("name")
+    except Exception:  # noqa: BLE001 - une carte inconnue n'est pas une panne
+        return None, None
+
+
+def match_link(links: list[str], number: str) -> str | None:
+    """Parmi les liens d'une recherche, celui dont le slug se termine par le
+    numéro imprimé de la carte.
+
+    Le numéro est la seule clé qui traverse la barrière de langue : le slug
+    Cardmarket finit par l'abréviation d'extension suivie du numéro
+    (`…/Kyogre-EM15`, `…/Ninetales-H19`). On tolère les lettres d'abréviation
+    entre le tiret et le numéro, et d'éventuels suffixes de variante (`-V1`).
+    """
+    pat = re.compile(rf"-[A-Za-z]*{re.escape(number)}(?:-V\d+)?$")
+    for href in links:
+        if pat.search(href.split("?")[0]):
+            return href
+    return None
+
+
+def resolve(browser: Browser, favs: list[dict], produits: dict, verbose: bool) -> tuple[int, int]:
+    """Retrouve l'URL produit des cartes qui n'en ont pas encore.
+
+    Espacé et prudent : la recherche est l'endpoint le plus protégé, et on ne la
+    paie qu'une fois par carte. Ce qui n'est pas résolu est laissé tel quel — à
+    corriger à la main dans `produits.json` — plutôt que deviné faux.
+    """
+    resolved = 0
+    attempted = 0
+    for fav in favs:
+        card_id = fav["cardId"]
+        if produits.get(card_id, {}).get("url"):
+            continue
+        attempted += 1
+        name_en, set_en = english_card(card_id)
+        base_name = name_en or fav.get("name") or ""
+        number = str(fav.get("localId") or "").strip()
+        if not base_name or not number:
+            continue
+        # La recherche par nom seul ne remonte pas une carte ancienne : trop de
+        # « Mewtwo » la relèguent hors de la première page. On qualifie donc par
+        # le set d'abord — « Mewtwo Expedition Base Set » — et on retombe sur le
+        # nom nu seulement si cela ne donne rien.
+        queries = [f"{base_name} {set_en}", base_name] if set_en else [base_name]
+        links: list[str] = []
+        try:
+            for query in queries:
+                links = browser.product_links(query)
+                if match_link(links, number):
+                    break
+                time.sleep(THROTTLE_S)
+        except Exception as error:  # noqa: BLE001
+            if verbose:
+                print(f"  {card_id} : recherche impossible ({error})", file=sys.stderr)
+            time.sleep(THROTTLE_S * 3)
+            continue
+        hit = match_link(links, number)
+        if hit:
+            produits[card_id] = {"url": hit}
+            resolved += 1
+            if verbose:
+                print(f"  {card_id} -> {hit.split('/Singles/')[-1]}", file=sys.stderr)
+        elif verbose:
+            print(
+                f"  {card_id} « {query} » n°{number} : {len(links)} liens, "
+                f"aucun ne correspond",
+                file=sys.stderr,
+            )
+        # La recherche enchaînée se fait throttler : on l'espace bien plus que le
+        # sondage, quitte à ce qu'un tour de résolution soit long. Il est rare.
+        time.sleep(THROTTLE_S * 3)
+    return resolved, attempted
+
+
+# --------------------------------------------------------------------- main
+
+
+def load_favs(path: Path | None) -> list[dict]:
+    """La liste de chasse : les cartes suivies, écrite par le site (comme
+    `queries.json` pour leboncoin). Absente, la résolution n'a rien à faire."""
+    if path is None:
+        path = data_dir() / "cartes-suivies.json"
+    return read_json(path) or []
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Collecte les offres Cardmarket.")
+    parser.add_argument("--cards", default=None, help="identifiants séparés par des virgules : ne sonde que ceux-là")
+    parser.add_argument("--resolve", action="store_true", help="résout d'abord les URLs manquantes")
+    parser.add_argument("--favs", type=Path, default=None, help="liste de chasse (défaut : .data/cardmarket/cartes-suivies.json)")
+    parser.add_argument("--visible", action="store_true", help="fenêtre à l'écran (pour lever un défi Cloudflare à la main)")
+    parser.add_argument("--headless", action="store_true", help="navigateur sans fenêtre (déconseillé : Cloudflare y est plus dur)")
+    parser.add_argument("--dry-run", action="store_true", help="n'écrit rien")
+    parser.add_argument("--quiet", action="store_true", help="pas de détail par carte")
+    args = parser.parse_args()
+
+    verbose = not args.quiet
+    produits_file = data_dir() / "produits.json"
+    cartes_file = data_dir() / "cartes.json"
+    produits = read_json(produits_file) or {}
+    started = time.time()
+
+    # Un seul collecteur à la fois : la minuterie et le déclencheur du site
+    # visent le même profil de navigateur, que deux Edge ne peuvent pas ouvrir
+    # ensemble. Le seul qui n'a pas le verrou s'efface — l'autre relèvera les
+    # mêmes cartes dans l'instant.
+    lock = Lock(data_dir() / "collect.lock")
+    if not lock.acquire():
+        print("cardmarket : un autre collecteur tourne déjà, passage ignoré", file=sys.stderr)
+        return 0
+
+    try:
+        browser = Browser(visible=args.visible, headless=args.headless)
+    except RuntimeError as error:
+        print(f"cardmarket : ÉCHEC {error}", file=sys.stderr)
+        journal(f"ÉCHEC lancement : {error}")
+        lock.release()
+        return 2
+
+    # La liste de chasse porte les critères par carte (reverse, première
+    # édition) ; on la lit toujours, pas seulement pour la résolution.
+    favs = load_favs(args.favs)
+    options_by_id = {
+        entry["cardId"]: entry for entry in favs if entry.get("cardId")
+    }
+
+    # Par défaut on sonde la liste de chasse — les cartes actuellement cochées —
+    # et non tout le cache d'URLs : une carte décochée garde son URL résolue dans
+    # `produits.json`, mais ne doit plus être relevée.
+    wanted = (
+        [c.strip() for c in args.cards.split(",") if c.strip()]
+        if args.cards
+        else [entry["cardId"] for entry in favs if entry.get("cardId")]
+    )
+
+    problems: list[str] = []
+    resolved = attempted = 0
+    try:
+        # Résolution à la demande : toute carte demandée sans URL connue est
+        # résolue avant d'être sondée. Sans cela, cocher « CM » sur une carte
+        # jamais résolue ne relevait rien — c'est ce qui laissait Mewtwo vide.
+        # `--resolve` élargit à *toutes* les cartes suivies, pour un tour complet.
+        want = set(wanted)
+        to_resolve = (
+            [f for f in favs if not f.get("url")]
+            if args.resolve
+            else [
+                f
+                for f in favs
+                if f.get("cardId") in want
+                and not f.get("url")  # lien collé à la main : rien à résoudre
+                and not produits.get(f["cardId"], {}).get("url")
+            ]
+        )
+        if to_resolve:
+            resolved, attempted = resolve(browser, to_resolve, produits, verbose)
+            if resolved and not args.dry_run:
+                write_atomic(produits_file, produits)
+
+        cards, problems = poll(browser, produits, wanted, options_by_id, verbose)
+    finally:
+        browser.close()
+        lock.release()
+
+    elapsed = time.time() - started
+    total_offers = sum(len(c["items"]) for c in cards.values())
+    summary = (
+        f"{len(cards)} carte(s), {total_offers} offres ({elapsed:.1f} s)"
+        + (f" ; résolu {resolved}/{attempted}" if args.resolve else "")
+        + (f" — {len(problems)} ennui(s)" if problems else "")
+    )
+    print(f"cardmarket : {summary}")
+
+    if args.dry_run:
+        for card_id, card in list(cards.items())[:10]:
+            cheapest = min((o["price"] for o in card["items"] if o["price"]), default=None)
+            price = f"{cheapest:.2f} EUR" if cheapest else "-"
+            print(f"  {card_id:14} {len(card['items']):3} offres  dès {price:>9}")
+        return 0
+
+    if cards:
+        # Le relevé se pose *par-dessus* l'existant : une carte non sondée à ce
+        # passage garde ses offres précédentes, que `lib/cardmarket.ts` périmera
+        # si le relevé vieillit trop. C'est la rotation qui économise, pas
+        # l'oubli — même principe que `collect_cards` de leboncoin.
+        previous = (read_json(cartes_file) or {}).get("cards") or {}
+        previous.update(cards)
+        write_atomic(cartes_file, {"at": int(started * 1000), "cards": previous})
+        print(f"  → {cartes_file}")
+
+    # État de la dernière tentative, écrit à *chaque* passage (même bredouille) :
+    # c'est lui qui permet au site de dire « collecte bloquée » plutôt que de
+    # laisser un fil vide sans explication. `challenged` distingue un défi
+    # Cloudflare — qui appelle un amorçage `--visible` — d'un simple creux.
+    challenged = any("défi" in problem.lower() for problem in problems)
+    write_atomic(
+        data_dir() / "status.json",
+        {
+            "at": int(started * 1000),
+            "watched": len(wanted),
+            "collected": len(cards),
+            "offers": total_offers,
+            "challenged": challenged,
+            "message": summary,
+        },
+    )
+
+    journal(summary)
+    # Rien relevé *et* que des ennuis : la minuterie doit pouvoir alerter.
+    return 1 if not cards and problems else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

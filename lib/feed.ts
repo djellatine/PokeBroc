@@ -17,6 +17,11 @@
  */
 
 import path from "node:path";
+import {
+  cmCondition,
+  readCardmarketForCard,
+  type CardmarketOffer,
+} from "./cardmarket";
 import { isConfigured as hasEbay, searchEbay, type EbayItem } from "./ebay";
 import { DATA_DIR, readJson, safeFileName, serialize, writeJson } from "./json-file";
 import { readLbcForCard, refreshLbcLive, type LbcItem } from "./lbc";
@@ -31,7 +36,7 @@ import {
 } from "./match";
 import { recordSightings } from "./sightings";
 import type { FavoriteCard } from "./store";
-import { getCard, type CardDetail } from "./tcgdex";
+import { cardImage, getCard, type CardDetail } from "./tcgdex";
 import { searchVinted, type VintedItem } from "./vinted";
 
 const DIR = path.join(DATA_DIR, "feed");
@@ -45,6 +50,14 @@ export const FRESH_MS = 10 * 60 * 1000;
  * plus le numéro.
  */
 const MAX_PER_CARD = 40;
+
+/**
+ * Places réservées aux offres Cardmarket dans le fil d'une carte suivie. Sans
+ * cette réserve, elles se font évincer par les annonces datées des autres
+ * sources (voir la fusion dans `refreshCard`). Douze suffisent à montrer les
+ * moins chères sans que Cardmarket n'occupe tout le fil de la carte.
+ */
+const CARDMARKET_SLOTS = 12;
 
 /** Carte concernée, réduite à ce que le fil affiche. */
 export interface FeedCard {
@@ -249,6 +262,59 @@ function fromLbc(item: Scored<LbcItem>, cardId: string): PendingItem {
 }
 
 /**
+ * Une offre Cardmarket vers une annonce du fil.
+ *
+ * À la différence des trois autres sources, elle ne passe pas par `scoreAll` :
+ * l'offre est rattachée à *cette* carte par son `idProduct`, sans passer par le
+ * titre. La correspondance est donc exacte par construction — score maximal,
+ * jamais gradée, jamais un lot — et il n'y a rien à deviner.
+ *
+ * L'écart à la cote garde tout son sens, contrairement à ce qu'on pourrait
+ * croire d'une offre qui *fait* la cote : la tendance Cardmarket est une moyenne
+ * lissée sur trente jours, et une offre fraîche très en dessous est précisément
+ * l'affaire qu'on guette — un vendeur qui brade sous la moyenne du marché.
+ */
+function fromCardmarket(offer: CardmarketOffer, card: CardDetail): PendingItem {
+  const trend = card.pricing?.cardmarket?.trend ?? card.pricing?.cardmarket?.avg30 ?? null;
+  const vsMarket =
+    trend && trend > 0 && offer.price !== null
+      ? Math.round(((offer.price - trend) / trend) * 100)
+      : null;
+
+  return {
+    cardId: card.id,
+    id: `cardmarket:${offer.idArticle}`,
+    source: "cardmarket",
+    title: [card.name, offer.condition, offer.seller].filter(Boolean).join(" · "),
+    url: offer.url,
+    // Cardmarket n'a pas de photo par offre. Plutôt que « sans photo », on
+    // affiche le scan de la carte, toujours disponible puisque l'offre est
+    // reliée à une carte connue par son `idProduct`.
+    thumbnail: cardImage(card.image, "low"),
+    price: offer.price,
+    // Les frais de port dépendent du panier et du pays : pas de prix total sûr.
+    totalPrice: null,
+    condition: cmCondition(offer.condition),
+    promoted: false,
+    favourites: 0,
+    // Cardmarket n'expose pas la date de mise en vente ; c'est `firstSeen`,
+    // posé au premier relevé où l'`idArticle` apparaît, qui date la nouveauté.
+    createdAt: null,
+    score: STRONG_SCORE,
+    graded: false,
+    bulk: false,
+    trend,
+    vsMarket,
+    // La France passe le filtre « français uniquement » ; un vendeur européen
+    // (Pays-Bas, Italie…) est traité comme étranger, ce qui est exact.
+    country: offer.country === "France" ? "FR" : offer.country,
+    auction: false,
+    bids: 0,
+    endsAt: null,
+  };
+}
+
+/**
  * Deux passes sur une place de marché, fusionnées.
  *
  * Rend toujours une liste, même vide : l'erreur éventuelle est retournée à
@@ -282,6 +348,19 @@ async function collect(
       const items = await readLbcForCard(card.id);
       const scored = scoreAll(items, card);
       return { items: scored.map((item) => fromLbc(item, card.id)), error: null };
+    }
+
+    // Cardmarket n'interroge rien non plus : le collecteur piloté par navigateur
+    // a déjà relevé les offres de cette carte. Aucune notation — la
+    // correspondance est exacte par `idProduct` — et une carte non sondée rend
+    // une liste vide, ce qui est le cas courant hors des cartes « précieuses ».
+    // Cardmarket ne lance rien depuis le fil : la collecte, qui pilote un
+    // navigateur, est déclenchée ailleurs — par le clic sur « CM » (une carte)
+    // et par la veille (toutes, en un lancement). Ici on ne fait que lire le
+    // dernier relevé, comme leboncoin.
+    if (source === "cardmarket") {
+      const offers = await readCardmarketForCard(card.id);
+      return { items: offers.map((offer) => fromCardmarket(offer, card)), error: null };
     }
 
     // Les deux passes partent ensemble ; les clients les sérialisent de toute
@@ -361,6 +440,10 @@ export async function refreshCard(
     // déposé — et rend une liste vide quand la carte n'a pas encore eu son
     // tour, ce qui n'est pas une erreur.
     const sources: Source[] = hasEbay() ? ["vinted", "ebay", "lbc"] : ["vinted", "lbc"];
+    // Cardmarket seulement pour les cartes cochées « précieuse » : la sonder
+    // coûte une page de navigateur, hors du site, et n'a de sens que pour les
+    // cartes qu'on guette vraiment. La liste vient de la carte elle-même.
+    if (favorite.cardmarket) sources.push("cardmarket");
     const collected = await Promise.all(
       sources.map((source) => collect(source, card, query, force)),
     );
@@ -399,10 +482,24 @@ export async function refreshCard(
     // derrière quarante annonces Vinted et eBay de même score. Départager par
     // date n'a pas seulement le mérite d'être neutre : c'est ce que la page
     // promet, les derniers mis en ligne d'abord.
-    const kept = [...best.values()]
-      .filter((item) => item.score >= WIDE_SCORE)
+    // Cardmarket ne date pas ses offres : leur `createdAt` est `null`, donc `0`
+    // dans le départage par date. Fondues au même tas que les autres, elles
+    // perdent toutes les égalités de score et tombent sous le plafond dès qu'une
+    // carte a quarante annonces Vinted et eBay plus récentes — c'est-à-dire
+    // qu'elles disparaissent précisément des cartes « précieuses » où on les
+    // guette. On leur réserve donc leurs places, les moins chères d'abord, et on
+    // complète avec le reste. Une carte non suivie sur Cardmarket n'a aucune
+    // offre de cette source : la réserve est alors vide et rien ne change.
+    const surviving = [...best.values()].filter((item) => item.score >= WIDE_SCORE);
+    const cardmarket = surviving
+      .filter((item) => item.source === "cardmarket")
+      .sort((a, b) => (a.price ?? Infinity) - (b.price ?? Infinity))
+      .slice(0, CARDMARKET_SLOTS);
+    const others = surviving
+      .filter((item) => item.source !== "cardmarket")
       .sort((a, b) => b.score - a.score || (b.createdAt ?? 0) - (a.createdAt ?? 0))
-      .slice(0, MAX_PER_CARD);
+      .slice(0, MAX_PER_CARD - cardmarket.length);
+    const kept = [...others, ...cardmarket];
 
     const firstSeen = await recordSightings(
       card.id,

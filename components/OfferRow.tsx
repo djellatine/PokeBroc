@@ -50,6 +50,7 @@ const SOURCE_DOTS: Record<Source, string> = {
   vinted: "bg-teal-400",
   ebay: "bg-blue-400",
   lbc: "bg-orange-400",
+  cardmarket: "bg-indigo-400",
 };
 
 /**
