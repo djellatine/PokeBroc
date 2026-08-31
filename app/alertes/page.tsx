@@ -1,10 +1,9 @@
 import type { Metadata } from "next";
-import TelegramLink from "@/components/TelegramLink";
+import DiscordTest from "@/components/DiscordTest";
 import { requireUser } from "@/lib/auth";
+import { isConfigured as hasDiscord } from "@/lib/discord";
 import { age, plural } from "@/lib/format";
-import { botName, isConfigured as hasTelegram } from "@/lib/telegram";
-import { readVeilleAt, veilleUser } from "@/lib/veille";
-import { TELEGRAM_CODE_TTL_MS } from "@/lib/store";
+import { readVeilleAt } from "@/lib/veille";
 
 export const metadata: Metadata = { title: "Alertes" };
 
@@ -15,15 +14,7 @@ export const dynamic = "force-dynamic";
 export default async function AlertesPage() {
   const user = await requireUser();
   const { state, now } = await readVeilleAt();
-  const linked = veilleUser(state, user.id);
-
-  const bot = botName();
-  const configured = hasTelegram();
-
-  const pendingCode =
-    user.telegramCode && now - (user.telegramCodeAt ?? 0) < TELEGRAM_CODE_TTL_MS
-      ? user.telegramCode
-      : null;
+  const configured = hasDiscord();
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-5 py-8 sm:py-12">
@@ -32,36 +23,53 @@ export default async function AlertesPage() {
         <p className="mt-2 text-sm leading-relaxed text-dim">
           Une veille balaie vos {plural(user.favorites.length, "carte suivie", "cartes suivies")} en
           dehors de vos visites. Chaque annonce qui apparaît — et que le fil vous montrerait par
-          défaut — vous est signalée sur Telegram.
+          défaut — est envoyée sur <strong className="text-text">Discord</strong>, dans le salon de
+          votre choix.
         </p>
       </header>
 
       <section className="panel p-5">
-        <h2 className="text-sm font-semibold">Telegram</h2>
+        <h2 className="text-sm font-semibold">Discord</h2>
 
-        {!configured ? (
-          <p className="mt-3 text-sm leading-relaxed text-dim">
-            Le bot n’est pas configuré sur ce serveur : <code className="font-mono">TELEGRAM_BOT_TOKEN</code>{" "}
-            est absent. La veille continue de balayer — les pastilles « nouveau » restent à jour —
-            mais aucune alerte ne part.
-          </p>
-        ) : linked ? (
+        {configured ? (
           <>
             <p className="mt-3 flex flex-wrap items-center gap-2 text-sm">
-              <span className="text-good">● Connecté</span>
-              <span className="text-faint">
-                depuis {age(linked.linkedAt, now)} · {plural(linked.sent, "alerte envoyée", "alertes envoyées")}
-              </span>
+              <span className="text-good">● Webhook branché</span>
+              {typeof state.sent === "number" && (
+                <span className="text-faint">
+                  {plural(state.sent, "alerte envoyée", "alertes envoyées")} au total
+                </span>
+              )}
             </p>
             <p className="mt-3 text-xs leading-relaxed text-dim">
-              Pour ne plus rien recevoir, envoyez <code className="font-mono text-text">/stop</code>{" "}
-              au bot. La déconnexion se fait depuis la conversation, et non d’ici : l’appairage
-              appartient au processus de veille, seul à écrire son fichier d’état.
+              Les alertes partent vers le salon du webhook <code className="font-mono">DISCORD_WEBHOOK_URL</code>.
+              Pour changer de salon, remplacez cette variable ; pour couper les alertes, retirez-la.
             </p>
+            <div className="mt-4">
+              <DiscordTest />
+            </div>
           </>
         ) : (
-          <div className="mt-3">
-            <TelegramLink botName={bot} ttlMs={TELEGRAM_CODE_TTL_MS} pendingCode={pendingCode} />
+          <div className="mt-3 flex flex-col gap-3 text-sm leading-relaxed text-dim">
+            <p>Aucun webhook configuré. Trois étapes, une minute :</p>
+            <ol className="flex list-decimal flex-col gap-1.5 pl-5">
+              <li>
+                Sur votre serveur Discord : <strong className="text-text">Paramètres du salon → Intégrations
+                → Webhooks → Nouveau webhook</strong>, puis <strong className="text-text">Copier l’URL</strong>.
+              </li>
+              <li>
+                Collez-la dans <code className="font-mono">.env.local</code> :
+                <br />
+                <code className="mt-1 inline-block rounded bg-panel-3 px-2 py-1 font-mono text-[12px] text-text">
+                  DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/…
+                </code>
+              </li>
+              <li>Relancez le site. La veille enverra alors ses alertes dans ce salon.</li>
+            </ol>
+            <p className="text-faint">
+              La veille continue de balayer sans webhook — les pastilles « nouveau » du fil restent à
+              jour — mais aucune alerte ne part.
+            </p>
           </div>
         )}
       </section>

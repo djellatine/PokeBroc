@@ -363,7 +363,7 @@ vignette. Un clic, elle disparaît et ne revient plus.
 
 **Sur le serveur, pas dans `localStorage`.** Une annonce congédiée depuis le téléphone doit le rester
 sur l'ordinateur ; et surtout, la veille tourne dans un autre processus — il lui faut lire cette
-liste pour ne pas annoncer sur Telegram ce qu'on vient tout juste d'écarter. Le cas n'est pas
+liste pour ne pas annoncer sur Discord ce qu'on vient tout juste d'écarter. Le cas n'est pas
 théorique : elle passe au quart d'heure, et une annonce découverte puis refusée sur le site entre
 deux passages serait sans cela notifiée juste après l'avoir été.
 
@@ -392,24 +392,26 @@ annoncer. Une notification qui ne se déclenche que devant l'écran ne notifie r
 
 `collect/veille.ts` est le second processus qui manquait. Sur minuterie — le même patron que le
 collecteur leboncoin — il balaie l'union des cartes suivies, relève la boîte de réception du bot,
-et envoie sur Telegram ce qui vient d'apparaître. Deux effets, dont le second était déjà souhaitable
+et envoie sur Discord ce qui vient d'apparaître. Deux effets, dont le second était déjà souhaitable
 avant qu'il soit question d'alertes :
 
 - les annonces neuves sont découvertes dans les minutes qui suivent leur mise en ligne ;
 - le badge « nouveau » redevient honnête pour qui ne vient qu'une fois par jour — sans veille, il ne
   montrait que ce que la visite venait elle-même de déterrer.
 
-### Pourquoi Telegram
+### Pourquoi Discord, et par webhook
 
 Le Web Push voudrait un service worker, des clés VAPID et surtout du HTTPS, que ce site n'a pas.
 L'e-mail partirait d'une IP résidentielle, donc en indésirables, à moins de louer un relais —
-c'est-à-dire d'ajouter le service tiers évité partout ailleurs. Telegram n'attend qu'un POST
-sortant : ni certificat, ni port ouvert, ni dépendance ajoutée. Le site en compte toujours trois
-(`next`, `react`, `react-dom`).
+c'est-à-dire d'ajouter le service tiers évité partout ailleurs. Un **webhook Discord** n'attend
+qu'un POST sortant : ni certificat, ni port ouvert, ni dépendance ajoutée. Le site en compte
+toujours trois (`next`, `react`, `react-dom`).
 
-Aucun webhook non plus : c'est la veille qui va chercher les messages (`getUpdates`), au rythme de
-son balayage. Un webhook exigerait une adresse publique, ce qui ferait rentrer le problème du HTTPS
-par la fenêtre.
+Webhook plutôt que bot : un bot demanderait une application, un jeton, des permissions et une
+connexion à entretenir. Le webhook est une simple URL liée à un salon — on la crée en trente
+secondes, on ne l'entretient pas. Sa contrepartie assumée : il écrit dans **un seul salon**, sans
+destinataire par personne. Pour un usage perso, c'est exactement ce qu'on veut, et c'est ce qui
+supprime tout l'appairage que le bot Telegram précédent imposait.
 
 ### Ce qui déclenche une alerte
 
@@ -420,7 +422,8 @@ plutôt qu'en inventer d'autres est la seule façon qu'une alerte ne mène pas �
 annoncée est justement filtrée — et un lien qui ne montre rien décrédibilise le suivant.
 
 La règle vit dans `lib/alerts.ts`, pas dans le script : c'est une décision métier, elle se teste sans
-réseau ni Telegram (`tests/alerts.test.ts`).
+réseau (`tests/alerts.test.ts`). La mise en forme et l'envoi vers Discord vivent à part, dans
+`lib/discord.ts`.
 
 ### Deux processus, un seul écrivain par fichier
 
@@ -429,11 +432,9 @@ le site et la veille liraient la même version de `users.json`, et la seconde é
 première — avec la carte que l'utilisateur venait d'épingler.
 
 D'où le partage, calqué sur celui de `collect/lbc.py` : le site possède `users.json`, la veille
-possède `.data/veille/state.json`, et chacun se contente de lire celui de l'autre. C'est ce qui
-explique une bizarrerie apparente de l'interface — **on connecte Telegram depuis le site, mais on
-s'en déconnecte en envoyant `/stop` au bot**. Un bouton « déconnecter » sur la page Alertes devrait
-écrire dans le fichier de l'autre processus, et rouvrirait exactement la course que ce découpage
-évite.
+possède `.data/veille/state.json`, et chacun se contente de lire celui de l'autre. Le webhook Discord
+n'ayant pas d'appairage, l'état de la veille se réduit à un repère global — la date après laquelle
+une annonce reste à annoncer — plus le compteur d'alertes envoyées.
 
 Le repère des alertes est distinct de celui du badge : `feedNewSince` suit les *visites* et recule
 au bouton « Tout marquer comme vu », là où `notifiedAt` n'avance que lorsqu'un message est
@@ -684,7 +685,7 @@ premier lancement, démarre `npm run dev` et ouvre le navigateur tout seul — d
 sans passer par un terminal.
 
 Aucune variable d'environnement n'est nécessaire en développement. `NEXT_PUBLIC_SITE_URL` sert au
-plan de site, `EBAY_CLIENT_ID` / `EBAY_CLIENT_SECRET` ajoutent eBay au fil, et `TELEGRAM_BOT_TOKEN`
+plan de site, `EBAY_CLIENT_ID` / `EBAY_CLIENT_SECRET` ajoutent eBay au fil, et `DISCORD_WEBHOOK_URL`
 les alertes. Chacune est facultative : sans elle, la fonction disparaît sans rien casser.
 
 ### Le collecteur leboncoin
@@ -770,15 +771,15 @@ Le collecteur reste poli : 2 s entre deux requêtes, empreinte de navigateur tir
 exécution, et arrêt anticipé dès qu'une page sort de la fenêtre — en pratique 9 requêtes par
 passage, soit ~72 par jour.
 
-### La veille et les alertes Telegram
+### La veille et les alertes Discord
 
-Facultative, comme les clés eBay : sans `TELEGRAM_BOT_TOKEN`, la veille balaie quand même — ce qui
+Facultative, comme les clés eBay : sans `DISCORD_WEBHOOK_URL`, la veille balaie quand même — ce qui
 garde le badge « nouveau » à jour — et n'envoie simplement rien.
 
 ```bash
-npm run veille                # balaie, appaire, alerte
+npm run veille                # balaie puis alerte sur Discord
 npm run veille -- --dry-run   # n'envoie rien, n'avance aucun repère
-npm run veille -- --no-sweep  # appairage et alertes seuls, sans balayage
+npm run veille -- --no-sweep  # alertes seules, sans balayage
 npm run veille -- --quiet     # pas de détail carte par carte
 ```
 
@@ -786,19 +787,16 @@ npm run veille -- --quiet     # pas de détail carte par carte
 comme d'habitude, puisque c'est justement ce qu'on veut observer. Le combiner avec `--no-sweep` pour
 ne toucher à rien.
 
-**Créer le bot**, une fois : écrire à [@BotFather](https://t.me/BotFather), `/newbot`, choisir un nom
-et un identifiant. Il rend un jeton, à poser dans `.env.local` :
+**Créer le webhook**, une fois : sur le serveur Discord, **Paramètres du salon → Intégrations →
+Webhooks → Nouveau webhook**, puis **Copier l'URL**. La poser dans `.env.local` :
 
 ```
-TELEGRAM_BOT_TOKEN=123456789:AAE...
-# Facultatif, cosmétique : fabrique le lien « Ouvrir Telegram » de la page Alertes,
-# qui lance la conversation avec le code déjà saisi.
-TELEGRAM_BOT_NAME=MonPokeBrocBot
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/123.../abc...
 ```
 
-**Connecter un compte** : page **Alertes** du site → « Obtenir un code » → envoyer ce code au bot.
-La liaison s'établit au passage suivant de la veille (le code vaut 15 minutes). `/stop` dans la
-conversation délie — voir plus haut pourquoi la déconnexion ne se fait pas depuis le site.
+C'est tout — pas de compte à connecter, pas de code. La page **Alertes** du site montre le webhook
+comme branché et propose un **message de test** pour vérifier qu'il pointe sur le bon salon. Les
+alertes arrivent en **embeds** : un par carte, avec son visuel, ses annonces neuves en liens.
 
 **La minuterie**, un quart d'heure convenant bien : c'est assez court pour qu'une annonce fraîche
 arrive tant qu'elle est disponible, et assez long pour qu'un balayage de vingt cartes (≈ 50 s,
@@ -867,7 +865,7 @@ un installateur et un script de déploiement.
 | Unité | Cadence | Rôle |
 | --- | --- | --- |
 | `pokebroc.service` | permanent | `next start` sur le port 3000, redémarré s'il tombe |
-| `pokebroc-veille.timer` | `*:0/15` | balayage de fond + alertes Telegram |
+| `pokebroc-veille.timer` | `*:0/15` | balayage de fond + alertes Discord |
 | `pokebroc-lbc.timer` | `*:5/15` | collecteur leboncoin |
 | `pokebroc-sauvegarde.timer` | 4 h du matin | archive `.data/`, 14 jours glissants |
 | `caddy` | permanent | HTTPS Let's Encrypt, reverse proxy vers 3000 |
@@ -1008,8 +1006,8 @@ app/
   actions/auth.ts           inscription, connexion, déconnexion, plafonds
   actions/favorites.ts      ajout / retrait d'une carte de la collection
   actions/feed.ts           masquer / réafficher une annonce, « tout marquer comme vu »
-  actions/telegram.ts       émission et annulation du code d'appairage
-  alertes/page.tsx          état de la veille, appairage Telegram
+  actions/discord.ts        message de test du webhook
+  alertes/page.tsx          état de la veille, réglage du webhook Discord
   api/cards/route.ts        proxy TCGdex + préchauffage des visuels
   api/carte-image/route.ts  visuels servis depuis le cache disque
   api/feed/route.ts         rafraîchissement d'une carte du fil
@@ -1033,11 +1031,12 @@ components/
   CardThumb.tsx             visuel de carte, avec réessais et repli sur le nom
   usePersisted.ts           préférences d'affichage (useSyncExternalStore)
   useHidden.ts              annonces masquées : état optimiste, retour arrière si l'écriture échoue
-  TelegramLink.tsx          code d'appairage : émission, copie, lien profond
+  DiscordTest.tsx           bouton « message de test » du webhook
+  CardmarketColumn.tsx      colonne des dernières offres Cardmarket
   AccountMenu.tsx, AuthForm.tsx, FavoriteButton.tsx, FocusSearchButton.tsx
 lib/
   auth.ts                   mots de passe, jetons, session
-  store.ts                  comptes, favoris, badge « nouveau », annonces masquées, code Telegram
+  store.ts                  comptes, favoris, badge « nouveau », annonces masquées
   feed.ts                   instantanés du fil, collecte, fraîcheur
   lots.ts                   lots : flux récent partagé + lots par carte suivie
   sightings.ts              annonces déjà vues, statistiques de prix
@@ -1050,8 +1049,8 @@ lib/
   match.ts                  notation des annonces, état, requêtes, vocabulaires éliminatoires
   format.ts                 euros, pourcentages, ancienneté
   alerts.ts                 ce qu'une alerte retient, et comment elle se lit
-  telegram.ts               bot Telegram : envoi, réception, échappement
-  veille.ts                 état de la veille (appairages, repère des alertes)
+  discord.ts                alertes Discord : webhook, embeds, envoi
+  veille.ts                 état de la veille (repère des alertes)
 collect/
   lbc.py                    collecteur leboncoin — lots, puis une tranche des cartes suivies
   test_lbc.py               ses tests, sans réseau
@@ -1105,8 +1104,8 @@ tests/                      node:test — match, ebay, rate-limit, sightings, fo
   tour suivant.
 - Une alerte part au plus tôt au passage suivant de la veille : à un quart d'heure de minuterie,
   c'est le délai entre la mise en ligne et la notification.
-- Telegram suppose un compte Telegram. C'est le prix du canal — voir plus haut ce que coûtaient les
-  deux autres.
+- Les alertes Discord partent dans un seul salon (webhook), sans destinataire par personne. C'est le
+  prix de la simplicité — voir plus haut pourquoi le webhook plutôt qu'un bot.
 - Leboncoin ne publie ni compteur de favoris ni prix total en recherche : le nombre de favoris vaut
   toujours zéro, et les frais de port n'apparaissent pas — le mode de remise se choisit à l'achat.
 

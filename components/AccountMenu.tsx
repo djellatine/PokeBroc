@@ -43,7 +43,7 @@ export default async function AccountMenu() {
           plutôt qu'un onglet dans `ModeSwitch`, qui n'oppose que les deux fils. */}
       <Link
         href="/alertes"
-        title="Recevoir les annonces neuves de vos cartes sur Telegram"
+        title="Recevoir les annonces neuves de vos cartes sur Discord"
         className="rounded-lg px-2 py-1.5 text-dim transition hover:text-text"
       >
         Alertes

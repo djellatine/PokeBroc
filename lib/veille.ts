@@ -34,36 +34,24 @@ import { DATA_DIR, readJson, serialize, writeJson } from "./json-file";
 export const VEILLE_DIR = path.join(DATA_DIR, "veille");
 const FILE = path.join(VEILLE_DIR, "state.json");
 
-export interface VeilleUser {
-  /** Conversation Telegram appairée. */
-  chatId: string;
-  /** Date de l'appairage, en ms epoch. */
-  linkedAt: number;
-  /**
-   * Les annonces vues **après** cette date restent à annoncer. Posée à
-   * l'appairage plutôt qu'à zéro : sans quoi le premier passage déverserait
-   * d'un coup les quarante annonces déjà sur le disque.
-   */
-  notifiedAt: number;
-  /** Alertes envoyées depuis l'appairage, pour le journal et la page Alertes. */
-  sent: number;
-}
-
 export interface VeilleState {
   /**
-   * Prochain `update_id` à demander à Telegram. Persisté, parce qu'il *est*
-   * l'accusé de réception : un offset perdu rejoue les anciens messages, un
-   * offset avancé trop tôt les perd.
+   * Les annonces découvertes **après** cette date restent à annoncer. Un seul
+   * repère global, là où l'appairage Telegram en tenait un par personne : le
+   * webhook Discord écrit dans un seul salon, il n'y a plus de destinataire à
+   * distinguer. Absent au premier passage — on le pose alors à « maintenant »,
+   * sans quoi la première alerte déverserait tout l'historique du disque.
    */
-  offset: number;
-  users: Record<string, VeilleUser>;
+  notifiedAt?: number;
+  /** Alertes envoyées au total, pour le journal et la page Alertes. */
+  sent?: number;
   /** Date du dernier balayage abouti, en ms epoch. */
   at?: number;
   /** Résumé du dernier passage, tel que la page Alertes l'affiche. */
   summary?: string;
 }
 
-const EMPTY: VeilleState = { offset: 0, users: {} };
+const EMPTY: VeilleState = {};
 
 /**
  * Lecture tolérante : le fichier n'existe pas tant que la veille n'a pas tourné
@@ -73,8 +61,8 @@ export async function readVeille(): Promise<VeilleState> {
   const parsed = await readJson<Partial<VeilleState>>(FILE);
   if (!parsed) return { ...EMPTY };
   return {
-    offset: typeof parsed.offset === "number" ? parsed.offset : 0,
-    users: parsed.users && typeof parsed.users === "object" ? parsed.users : {},
+    notifiedAt: typeof parsed.notifiedAt === "number" ? parsed.notifiedAt : undefined,
+    sent: typeof parsed.sent === "number" ? parsed.sent : undefined,
     at: parsed.at,
     summary: parsed.summary,
   };
@@ -96,9 +84,4 @@ export async function writeVeille(state: VeilleState): Promise<void> {
 export async function readVeilleAt(): Promise<{ state: VeilleState; now: number }> {
   const state = await readVeille();
   return { state, now: Date.now() };
-}
-
-/** Appairage d'un compte donné, ou `null` s'il n'a pas connecté Telegram. */
-export function veilleUser(state: VeilleState, userId: string): VeilleUser | null {
-  return state.users[userId] ?? null;
 }

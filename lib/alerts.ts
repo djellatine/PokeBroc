@@ -2,10 +2,10 @@
  * Ce qu'une alerte retient, et comment elle se lit.
  *
  * Séparé de `collect/veille.ts` pour la même raison que `lbc.ts` l'est de
- * `collect/lbc.py` : le script est une orchestration — relever la boîte de
- * réception, balayer, envoyer — tandis que la règle « cette annonce mérite-t-elle
- * de faire vibrer un téléphone ? » est une décision métier, qui se teste sans
- * réseau et sans Telegram.
+ * `collect/lbc.py` : le script est une orchestration — balayer, envoyer —
+ * tandis que la règle « cette annonce mérite-t-elle une alerte ? » est une
+ * décision métier, qui se teste sans réseau. La mise en forme et l'envoi vers
+ * Discord vivent dans `lib/discord.ts` ; ici on ne décide que du *quoi*.
  *
  * Aucun import de `node:` ici : rien de ce fichier ne touche au disque.
  */
@@ -14,12 +14,10 @@ import { euro, percent, plural } from "./format";
 import { CONDITION_LABELS, STRONG_SCORE } from "./match";
 import { SOURCE_NAMES } from "./source";
 import type { FeedCard, FeedItem } from "./feed";
-import { escapeHtml } from "./telegram";
 
 /**
  * Annonces citées dans un message. Au-delà, on renvoie au site : trente liens
- * sur un téléphone ne se lisent pas, et Telegram découperait en trois messages
- * dont personne n'ouvrirait le dernier.
+ * ne se lisent pas d'un coup, et Discord plafonne de toute façon ses embeds.
  */
 export const MAX_ALERTS = 25;
 
@@ -64,8 +62,14 @@ export function selectFresh(
     .sort((a, b) => b.firstSeen - a.firstSeen);
 }
 
-/** Une annonce, sur une seule ligne cliquable. */
-export function offerLine(item: FeedItem): string {
+/**
+ * Une annonce, en une ligne de texte : « 12,00 € · −38 % · Vinted · Bon ».
+ *
+ * Volontairement sans lien ni balisage : c'est `lib/discord.ts` qui l'habille
+ * (`[texte](url)` en Markdown Discord). Rester en texte brut la garde pure et
+ * testable, et réutilisable si un autre transport arrive un jour.
+ */
+export function offerText(item: FeedItem): string {
   const parts = [euro(item.totalPrice ?? item.price)];
 
   if (item.auction) parts.push(`enchère · ${plural(item.bids, "offre")}`);
@@ -76,57 +80,5 @@ export function offerLine(item: FeedItem): string {
   parts.push(SOURCE_NAMES[item.source]);
   if (item.condition) parts.push(CONDITION_LABELS[item.condition]);
 
-  return `<a href="${escapeHtml(item.url)}">${escapeHtml(parts.join(" · "))}</a>`;
-}
-
-/**
- * Le message, ligne à ligne — à `chunk()` de le découper si Telegram le refuse.
- *
- * Groupé par carte plutôt qu'à plat : dix annonces d'affilée sans savoir
- * laquelle de ses cartes est concernée obligeraient à ouvrir chaque lien pour
- * le découvrir.
- */
-export function compose(groups: AlertGroup[], max = MAX_ALERTS): string[] {
-  const total = groups.reduce((count, group) => count + group.items.length, 0);
-  const lines = [`🔔 <b>${plural(total, "nouvelle annonce", "nouvelles annonces")}</b>`];
-
-  let shown = 0;
-  for (const group of groups) {
-    if (shown >= max) break;
-
-    const title = group.card.localId
-      ? `${group.card.name} — ${group.card.localId}`
-      : group.card.name;
-
-    lines.push("");
-    lines.push(
-      `<b>${escapeHtml(title)}</b>${group.card.setName ? ` · ${escapeHtml(group.card.setName)}` : ""}`,
-    );
-
-    for (const item of group.items) {
-      if (shown >= max) break;
-      lines.push(offerLine(item));
-      shown += 1;
-    }
-  }
-
-  if (total > shown) {
-    lines.push("");
-    lines.push(`<i>… et ${plural(total - shown, "autre")}, sur le site.</i>`);
-  }
-
-  return lines;
-}
-
-/**
- * Un motif d'échec définitif : la conversation n'existe plus, ou le bot y est
- * banni. Réessayer au prochain passage n'y changerait rien — la veille délie
- * plutôt que d'empiler la même erreur toutes les quinze minutes.
- *
- * Tout le reste — coupure réseau, 500 de Telegram — est traité comme passager,
- * et le repère des alertes ne bouge alors pas : les annonces seront renvoyées
- * au passage suivant plutôt que perdues.
- */
-export function isPermanentFailure(message: string): boolean {
-  return /blocked|chat not found|deactivated|forbidden|kicked/i.test(message);
+  return parts.join(" · ");
 }
