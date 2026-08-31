@@ -516,10 +516,20 @@ fenêtre **hors écran** par défaut — invisible, mais bien meilleur que *head
 et `--visible` quand un défi doit être levé à la main. Aucun script ne coche un CAPTCHA : au premier
 usage ou après un durcissement, `python collect/cardmarket.py --visible --resolve` une fois.
 
-Le blocage de Cloudflare est **fonction du volume** (`navigator.webdriver` reste `false` : ce n'est
-pas une détection d'automatisation) ; une cadence douce le tient à distance, un marathon de requêtes
-le réveille. D'où la minuterie au quart d'heure et le champ `status.json`, que le site lit pour
-afficher un bandeau « collecte bloquée » plutôt qu'un fil vide sans explication (`cardmarketWarning`).
+Lancer Edge par Playwright pose par défaut `--enable-automation`, donc
+`navigator.webdriver = true` — que Cloudflare lit, et son défi tourne alors en boucle même quand on
+coche la case à la main. On l'efface (`ignore_default_args=["--enable-automation"]` +
+`--disable-blink-features=AutomationControlled`) : `webdriver` repasse à `false` et le défi se lève.
+Le blocage résiduel est **fonction du volume**, pas de l'automatisation ; une cadence douce le tient
+à distance, un marathon de requêtes le réveille. D'où la minuterie au quart d'heure et le champ
+`status.json`, que le site lit pour afficher « collecte bloquée » plutôt qu'un vide sans explication
+(`cardmarketWarning`).
+
+Les offres ne remontent **pas dans le fil** — sans photo par offre, elles en cassaient la grille —
+mais dans une **colonne dédiée** (`components/CardmarketColumn.tsx`), à droite. Elle plafonne à
+quelques offres par carte (`CARDMARKET_PER_CARD`) pour qu'activer une carte ne noie pas les autres,
+se trie (récentes / prix / écart), s'écarte offre par offre (une croix, même stockage que les
+masquages du fil) et se rafraîchit seule via `GET /api/cardmarket`, sans recharger la page.
 
 Cette collecte ne peut tourner que sur une machine à Edge et IP résidentielle — jamais sur le serveur
 Linux, où `CARDMARKET_PYTHON` est absent et le balayage de la veille reste un no-op. Sous Windows, la

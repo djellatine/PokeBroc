@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { dropFavorite, toggleCardmarketWatch } from "@/app/actions/favorites";
 import CardThumb from "@/components/CardThumb";
@@ -114,6 +114,23 @@ export default function CollectionStrip({
     setMenu({ cardId, x: rect.left, y: rect.bottom + 6 });
   }
 
+  // Recherche dans la collection : avec des dizaines de cartes, retrouver celle
+  // à (dé)cocher au défilé était pénible. Le filtre est accent-insensible et
+  // porte sur le nom, l'extension et le numéro.
+  const [query, setQuery] = useState("");
+  const shown = useMemo(() => {
+    const norm = (value: string | null) =>
+      (value ?? "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+    const needle = norm(query).trim();
+    if (!needle) return favorites;
+    return favorites.filter(
+      (favorite) =>
+        norm(favorite.name).includes(needle) ||
+        norm(favorite.setName).includes(needle) ||
+        norm(favorite.localId).includes(needle),
+    );
+  }, [favorites, query]);
+
   function remove(cardId: string) {
     setRemoving((current) => [...current, cardId]);
     if (selected === cardId) onSelect(null);
@@ -127,17 +144,42 @@ export default function CollectionStrip({
 
   return (
     <section className="flex flex-col gap-2">
-      <div className="flex items-baseline justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="eyebrow">Ma collection · {plural(favorites.length, "carte")}</h2>
-        {selected && (
-          <button
-            type="button"
-            onClick={() => onSelect(null)}
-            className="text-[11px] text-accent transition hover:underline"
-          >
-            Voir toutes les cartes
-          </button>
-        )}
+
+        <div className="flex items-center gap-2">
+          {selected && (
+            <button
+              type="button"
+              onClick={() => onSelect(null)}
+              className="text-[11px] text-accent transition hover:underline"
+            >
+              Voir toutes les cartes
+            </button>
+          )}
+
+          <div className="relative">
+            <svg
+              viewBox="0 0 24 24"
+              aria-hidden
+              className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-faint"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <circle cx="11" cy="11" r="7" />
+              <path d="m20 20-3-3" strokeLinecap="round" />
+            </svg>
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Rechercher une carte…"
+              aria-label="Rechercher une carte de ma collection"
+              className="h-7 w-44 rounded-md border border-line bg-panel-2 pl-7 pr-2 text-xs outline-none transition focus:border-accent"
+            />
+          </div>
+        </div>
       </div>
 
       <ul
@@ -145,7 +187,10 @@ export default function CollectionStrip({
         role="group"
         aria-label="Filtrer le fil par carte"
       >
-        {favorites.map((favorite) => {
+        {shown.length === 0 && (
+          <li className="px-1 py-4 text-xs text-faint">Aucune carte ne correspond.</li>
+        )}
+        {shown.map((favorite) => {
           const pending = removing.includes(favorite.cardId);
           const count = counts[favorite.cardId];
           const active = selected === favorite.cardId;
@@ -243,7 +288,7 @@ export default function CollectionStrip({
             ref={menuRef}
             role="dialog"
             aria-label="Surveillance Cardmarket"
-            className="fixed z-50 w-56 rounded-lg border border-line-strong bg-panel-3 p-3 text-xs shadow-xl"
+            className="fixed z-50 w-72 overflow-hidden rounded-xl border border-line-strong bg-panel-3 text-xs shadow-2xl"
             style={{ top: menu.y, left: menu.x }}
           >
             {(() => {
@@ -251,78 +296,130 @@ export default function CollectionStrip({
               const on = Boolean(watched[id]);
               const pref = prefs[id] ?? {};
               const busy = toggling.includes(id);
+              const name = favorites.find((f) => f.cardId === id)?.name ?? "cette carte";
+
               return (
-                <div className="flex flex-col gap-2.5">
-                  <label className="flex items-center gap-2 font-semibold">
-                    <input
-                      type="checkbox"
-                      checked={on}
+                <>
+                  {/* En-tête : la carte, et l'interrupteur de surveillance. */}
+                  <div className="flex items-center justify-between gap-2 border-b border-line px-3.5 py-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-[13px] font-bold" title={name}>
+                        {name}
+                      </p>
+                      <p className="text-[10px] text-faint">Surveiller sur Cardmarket</p>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={on}
                       disabled={busy}
-                      onChange={() => apply(id, !on, on ? {} : pref)}
-                      className="accent-accent"
-                    />
-                    Surveiller sur Cardmarket
-                  </label>
-
-                  <div className={`flex flex-col gap-1.5 pl-1 ${on ? "" : "opacity-40"}`}>
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={Boolean(pref.reverse)}
-                        disabled={busy}
-                        onChange={() => apply(id, true, { ...pref, reverse: !pref.reverse })}
-                        className="accent-accent"
+                      onClick={() => apply(id, !on, on ? {} : pref)}
+                      className={`relative h-5 w-9 shrink-0 rounded-full transition ${
+                        on ? "bg-accent" : "bg-line-strong"
+                      }`}
+                    >
+                      <span
+                        className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${
+                          on ? "left-[1.15rem]" : "left-0.5"
+                        }`}
                       />
-                      Reverse
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={Boolean(pref.firstEd)}
-                        disabled={busy}
-                        onChange={() => apply(id, true, { ...pref, firstEd: !pref.firstEd })}
-                        className="accent-accent"
-                      />
-                      1ère édition
-                    </label>
+                    </button>
                   </div>
 
-                  <div className="border-t border-line pt-2">
-                    <label className="block text-[10px] text-dim">
-                      Lien Cardmarket (si la carte n’apparaît pas)
-                    </label>
-                    <input
-                      type="url"
-                      inputMode="url"
-                      placeholder="coller l’adresse de la page…"
-                      value={urls[id] ?? ""}
-                      disabled={busy}
-                      onChange={(event) =>
-                        setUrls((current) => ({ ...current, [id]: event.target.value }))
-                      }
-                      onBlur={() => commitUrl(id)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          commitUrl(id);
+                  {/* Corps : tirage recherché, puis lien de secours. */}
+                  <div className={`flex flex-col gap-3 px-3.5 py-3 ${on ? "" : "opacity-45"}`}>
+                    <div>
+                      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-faint">
+                        Tirage
+                      </p>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <PillToggle
+                          active={Boolean(pref.reverse)}
+                          disabled={busy || !on}
+                          onClick={() => apply(id, true, { ...pref, reverse: !pref.reverse })}
+                        >
+                          Reverse
+                        </PillToggle>
+                        <PillToggle
+                          active={Boolean(pref.firstEd)}
+                          disabled={busy || !on}
+                          onClick={() => apply(id, true, { ...pref, firstEd: !pref.firstEd })}
+                        >
+                          1ère édition
+                        </PillToggle>
+                      </div>
+                    </div>
+
+                    <div>
+                      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-faint">
+                        Lien Cardmarket
+                        <span className="ml-1 font-normal normal-case text-faint/80">
+                          si la carte n’apparaît pas
+                        </span>
+                      </p>
+                      <input
+                        type="url"
+                        inputMode="url"
+                        placeholder="coller l’adresse de la page…"
+                        value={urls[id] ?? ""}
+                        disabled={busy}
+                        onChange={(event) =>
+                          setUrls((current) => ({ ...current, [id]: event.target.value }))
                         }
-                      }}
-                      className="mt-1 w-full rounded border border-line bg-panel px-2 py-1 text-[11px] outline-none focus:border-accent"
-                    />
-                    {urlError && menu.cardId === id && (
-                      <p className="mt-1 text-[10px] text-bad">{urlError}</p>
-                    )}
+                        onBlur={() => commitUrl(id)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            commitUrl(id);
+                          }
+                        }}
+                        className="w-full rounded-md border border-line bg-panel px-2.5 py-1.5 text-[11px] outline-none transition focus:border-accent"
+                      />
+                      {urlError && menu.cardId === id && (
+                        <p className="mt-1 text-[10px] text-bad">{urlError}</p>
+                      )}
+                    </div>
                   </div>
 
-                  <p className="text-[10px] text-faint">
-                    Toujours en français. Les offres apparaissent au prochain relevé.
+                  <p className="border-t border-line bg-panel-2 px-3.5 py-2 text-[10px] text-faint">
+                    Toujours en français · offres au prochain relevé
                   </p>
-                </div>
+                </>
               );
             })()}
           </div>,
           document.body,
         )}
     </section>
+  );
+}
+
+/** Bouton-pastille à deux états, pour les critères de tirage du menu CM. */
+function PillToggle({
+  active,
+  disabled,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={active}
+      disabled={disabled}
+      onClick={onClick}
+      className={`rounded-md border px-2 py-1.5 text-[11px] font-medium transition ${
+        active
+          ? "border-accent/70 bg-accent/20 text-accent"
+          : "border-line bg-panel text-dim hover:border-line-strong"
+      } disabled:cursor-not-allowed`}
+    >
+      {children}
+    </button>
   );
 }

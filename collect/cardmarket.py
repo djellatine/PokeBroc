@@ -149,6 +149,11 @@ TIMEOUT_MS = 45000
 # laisser peupler. Mesuré à ~2 s ; on prend une marge.
 SETTLE_MS = 2500
 
+# En mode visible (amorçage), temps laissé à l'utilisateur pour lever le défi
+# Cloudflare à la main avant d'abandonner. Large : cocher la case, attendre le
+# rechargement, ça se compte en dizaines de secondes.
+VISIBLE_WAIT_S = 120
+
 LOG_LINES = 200
 
 # Les codes d'état de Cardmarket, dans l'ordre décroissant. Repris tels quels
@@ -324,11 +329,16 @@ class Browser:
     """
 
     def __init__(self, visible: bool = False, headless: bool = False):
+        self._visible = visible
         self._play = sync_playwright().start()
         profile = data_dir() / "profil"
         profile.mkdir(parents=True, exist_ok=True)
 
-        args: list[str] = []
+        # Effacer les marques d'automatisation que Cloudflare lit : sans elles,
+        # son défi tourne en boucle même quand l'utilisateur coche la case. On
+        # retire `--enable-automation` (qui pose `navigator.webdriver`) et on
+        # débranche la détection Blink correspondante.
+        args = ["--disable-blink-features=AutomationControlled"]
         if not visible and not headless:
             # Hors du bureau visible, sans être headless : le compromis
             # « invisible mais crédible » face à Cloudflare.
@@ -340,6 +350,7 @@ class Browser:
                 channel="msedge",
                 headless=headless,
                 args=args,
+                ignore_default_args=["--enable-automation"],
                 viewport={"width": 1280, "height": 900},
             )
         except Exception as error:
@@ -357,21 +368,41 @@ class Browser:
         panne du script mais un cookie à renouveler, décision qui revient à
         l'appelant — comme un 403 Datadome pour leboncoin.
         """
-        # Cloudflare sert parfois son défi à la première navigation, puis le
-        # résout de lui-même : quelques tentatives après un répit tombent sur la
-        # vraie page. On ne signale le défi que s'il persiste. Deux ré-essais
-        # plutôt qu'un : un seul ne suffisait pas sur certaines pages anciennes.
+        if not self._settle(url):
+            return [], True
+        return self._page.evaluate(EXTRACT_JS), False
+
+    def _settle(self, url: str) -> bool:
+        """Charge `url` et franchit le défi Cloudflare s'il y en a un. Rend
+        `True` si on tombe sur la vraie page, `False` si le défi persiste.
+
+        Deux stratégies. **Invisible** : Cloudflare sert parfois son défi à la
+        première navigation puis le résout seul ; deux reprises espacées
+        suffisent le plus souvent. **Visible** (`--visible`) : c'est l'amorçage,
+        où l'utilisateur lève le défi à la main — on lui laisse le temps, en
+        guettant que le titre change, jusqu'à `VISIBLE_WAIT_S`. Une fois le
+        `cf_clearance` obtenu, il vaut pour les pages suivantes.
+        """
         self._page.goto(url, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
         self._page.wait_for_timeout(SETTLE_MS)
+        if not self._is_challenge():
+            return True
+
+        if self._visible:
+            deadline = time.time() + VISIBLE_WAIT_S
+            while time.time() < deadline:
+                self._page.wait_for_timeout(2000)
+                if not self._is_challenge():
+                    return True
+            return False
+
         for _ in range(2):
-            if not self._is_challenge():
-                break
             self._page.wait_for_timeout(4000)
             self._page.goto(url, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
             self._page.wait_for_timeout(SETTLE_MS)
-        if self._is_challenge():
-            return [], True
-        return self._page.evaluate(EXTRACT_JS), False
+            if not self._is_challenge():
+                return True
+        return not self._is_challenge()
 
     def _is_challenge(self) -> bool:
         """Vrai si la page est l'écran d'attente de Cloudflare.
@@ -398,7 +429,8 @@ class Browser:
             "https://www.cardmarket.com/fr/Pokemon/Products/Search"
             f"?searchString={query.replace(' ', '+')}"
         )
-        self._page.goto(url, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
+        if not self._settle(url):
+            return []
         try:
             self._page.wait_for_selector(
                 "a[href*='/Products/Singles/']", timeout=12000
@@ -432,11 +464,31 @@ def full_url(path_or_url: str, reverse: bool = False, first_ed: bool = False) ->
 # ------------------------------------------------------------------- sondage
 
 
+def card_trend(card_id: str) -> float | None:
+    """La cote Cardmarket (tendance) d'une carte, via TCGdex.
+
+    Stockée avec les offres pour que la colonne du site calcule l'écart sans
+    rappeler TCGdex à chaque rendu. `trend` d'abord, `avg30` en repli — la même
+    règle que le fil (`feed.ts`)."""
+    try:
+        with urllib.request.urlopen(
+            f"https://api.tcgdex.net/v2/fr/cards/{card_id}", timeout=15
+        ) as response:
+            cm = (json.load(response).get("pricing") or {}).get("cardmarket") or {}
+            value = cm.get("trend")
+            if value is None:
+                value = cm.get("avg30")
+            return float(value) if value is not None else None
+    except Exception:  # noqa: BLE001 - une cote absente n'est pas une panne
+        return None
+
+
 def poll(
     browser: Browser,
     produits: dict,
     wanted: list[str],
     options_by_id: dict,
+    previous: dict,
     verbose: bool,
 ) -> tuple[dict, list[str]]:
     """Relève les offres de chaque carte demandée dont l'URL est connue.
@@ -472,7 +524,19 @@ def poll(
             continue
 
         offers = [o for o in (normalize_offer(r, url) for r in raw) if o]
-        cards[card_id] = {"at": now, "url": url, "items": offers}
+
+        # Date de première apparition, reprise du relevé précédent : une offre
+        # déjà vue garde sa date, une inconnue est datée de maintenant. C'est
+        # elle qui classe les « derniers ajouts » de la colonne et signe une
+        # nouveauté — sans dépendre d'une date que Cardmarket n'expose pas.
+        seen_before = {
+            item.get("idArticle"): item.get("firstSeen")
+            for item in (previous.get(card_id) or {}).get("items") or []
+        }
+        for offer in offers:
+            offer["firstSeen"] = seen_before.get(offer["idArticle"]) or now
+
+        cards[card_id] = {"at": now, "url": url, "trend": card_trend(card_id), "items": offers}
         if verbose:
             cheapest = min((o["price"] for o in offers if o["price"]), default=None)
             tail = f", dès {cheapest:.2f} EUR" if cheapest else ""
@@ -594,6 +658,7 @@ def main() -> int:
     produits_file = data_dir() / "produits.json"
     cartes_file = data_dir() / "cartes.json"
     produits = read_json(produits_file) or {}
+    previous_cards = (read_json(cartes_file) or {}).get("cards") or {}
     started = time.time()
 
     # Un seul collecteur à la fois : la minuterie et le déclencheur du site
@@ -653,7 +718,7 @@ def main() -> int:
             if resolved and not args.dry_run:
                 write_atomic(produits_file, produits)
 
-        cards, problems = poll(browser, produits, wanted, options_by_id, verbose)
+        cards, problems = poll(browser, produits, wanted, options_by_id, previous_cards, verbose)
     finally:
         browser.close()
         lock.release()
@@ -679,9 +744,9 @@ def main() -> int:
         # passage garde ses offres précédentes, que `lib/cardmarket.ts` périmera
         # si le relevé vieillit trop. C'est la rotation qui économise, pas
         # l'oubli — même principe que `collect_cards` de leboncoin.
-        previous = (read_json(cartes_file) or {}).get("cards") or {}
-        previous.update(cards)
-        write_atomic(cartes_file, {"at": int(started * 1000), "cards": previous})
+        merged = dict(previous_cards)
+        merged.update(cards)
+        write_atomic(cartes_file, {"at": int(started * 1000), "cards": merged})
         print(f"  → {cartes_file}")
 
     # État de la dernière tentative, écrit à *chaque* passage (même bredouille) :

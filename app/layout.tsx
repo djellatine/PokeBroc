@@ -63,7 +63,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           </div>
         </header>
 
-        <main id="contenu" className="mx-auto w-full max-w-[1360px] flex-1 px-4 py-6">
+        <main id="contenu" className="mx-auto w-full max-w-[1360px] flex-1 px-4 py-6 xl:max-w-[1720px]">
           {children}
         </main>
 

@@ -2,7 +2,7 @@ import Link from "next/link";
 import Dashboard from "@/components/Dashboard";
 import FocusSearchButton from "@/components/FocusSearchButton";
 import { getCurrentUser } from "@/lib/auth";
-import { cardmarketWarning } from "@/lib/cardmarket";
+import { cardmarketWarning, recentCardmarketOffers } from "@/lib/cardmarket";
 import { readSnapshots, staleCardIds } from "@/lib/feed";
 import { touchFeedVisit } from "@/lib/store";
 
@@ -18,9 +18,11 @@ export default async function Home() {
   // Les lots ne sont plus lus ici : ils ont leur propre route (`/lots`), et rien
   // n'obligeait à payer leur lecture pour une section que le fil enterrait cinq
   // écrans plus bas.
-  const [visit, snapshots, cmWarning] = await Promise.all([
+  const hiddenIds = new Set(Object.keys(user.hidden ?? {}));
+  const [visit, snapshots, cmOffers, cmWarning] = await Promise.all([
     touchFeedVisit(user.id),
     readSnapshots(user.favorites),
+    recentCardmarketOffers(user.favorites, hiddenIds),
     cardmarketWarning(user.favorites),
   ]);
 
@@ -32,6 +34,7 @@ export default async function Home() {
       initialHidden={Object.keys(user.hidden ?? {})}
       newSince={visit.newSince}
       serverNow={visit.now}
+      cardmarketOffers={cmOffers}
       cardmarketWarning={cmWarning}
     />
   );

@@ -27,7 +27,6 @@ import { execFile } from "node:child_process";
 import path from "node:path";
 import { promisify } from "node:util";
 import { DATA_DIR, readJson, writeJson } from "./json-file";
-import type { Condition } from "./match";
 import type { FavoriteCard } from "./store";
 
 /** Doit rester identique aux chemins qu'écrit `collect/cardmarket.py`. */
@@ -48,11 +47,13 @@ export interface CardmarketOffer {
   price: number | null;
   /** Pas d'URL par offre : l'achat se fait sur la page produit. */
   url: string;
-  /** Code d'état Cardmarket (`NM`, `LP`…) ou `null` — ramené aux quatre niveaux par `cmCondition`. */
+  /** Code d'état Cardmarket brut (`NM`, `LP`, `PO`…) ou `null`. */
   condition: string | null;
   /** Pays du vendeur, en toutes lettres (« Pays-Bas ») ou `null`. */
   country: string | null;
   seller: string | null;
+  /** Première fois que le collecteur a croisé cette offre, en ms epoch. */
+  firstSeen: number;
 }
 
 export interface CardmarketCardResult {
@@ -60,6 +61,8 @@ export interface CardmarketCardResult {
   at: number;
   /** Page produit sondée. */
   url: string;
+  /** Cote Cardmarket de la carte (TCGdex), pour l'écart. */
+  trend: number | null;
   items: CardmarketOffer[];
 }
 
@@ -78,8 +81,17 @@ export interface CardmarketSnapshot {
  */
 export const CARDMARKET_CARD_MAX_AGE_MS = 3 * 60 * 60 * 1000;
 
-/** Offres conservées par carte : les moins chères, là où vivent les affaires. */
-export const CARDMARKET_MAX_PER_CARD = 15;
+/** Offres remontées dans la colonne. Au-delà, ce n'est plus « les derniers ». */
+export const CARDMARKET_COLUMN_MAX = 40;
+
+/**
+ * Offres gardées **par carte** dans la colonne. Sans ce plafond, activer une
+ * carte y déverse ses trente offres d'un coup — toutes datées « maintenant »,
+ * puisque Cardmarket n'expose pas la mise en ligne — et elles noient toutes les
+ * autres cartes. On n'en garde donc que les moins chères par carte : chaque
+ * carte a sa place, et ce sont ses meilleures offres qui la représentent.
+ */
+export const CARDMARKET_PER_CARD = 6;
 
 export async function readCardmarketCards(): Promise<CardmarketSnapshot | null> {
   const snapshot = await readJson<CardmarketSnapshot>(CARDS_FILE);
@@ -88,53 +100,91 @@ export async function readCardmarketCards(): Promise<CardmarketSnapshot | null> 
 }
 
 /**
- * Les offres Cardmarket d'une carte, si le relevé est encore d'actualité.
- *
- * Rend une liste vide plutôt que de lever, comme `readLbcForCard` : l'absence
- * est le cas courant — une carte non cochée « précieuse » n'est jamais sondée —
- * et ce n'est pas une panne. Les offres sont rendues triées par prix croissant,
- * les moins chères d'abord, et plafonnées : au-delà, ce n'est plus un fil de
- * bonnes affaires mais le carnet d'ordres entier.
+ * Une offre prête pour la colonne Cardmarket : l'offre, plus ce qu'il faut de
+ * la carte pour l'afficher et calculer son écart.
  */
-export async function readCardmarketForCard(
-  cardId: string,
-  now = Date.now(),
-  maxAge = CARDMARKET_CARD_MAX_AGE_MS,
-): Promise<CardmarketOffer[]> {
-  const snapshot = await readCardmarketCards();
-  const found = snapshot?.cards[cardId];
-  if (!found || now - found.at > maxAge) return [];
-
-  return [...found.items]
-    .sort((a, b) => (a.price ?? Infinity) - (b.price ?? Infinity))
-    .slice(0, CARDMARKET_MAX_PER_CARD);
+export interface CardmarketRow {
+  cardId: string;
+  name: string;
+  /** Base d'URL TCGdex du visuel, sans extension — voir `cardImage()`. */
+  image: string | null;
+  localId: string | null;
+  idArticle: string;
+  price: number | null;
+  /** Code d'état Cardmarket brut (`NM`, `LP`, `PO`…), coloré à l'affichage. */
+  condition: string | null;
+  country: string | null;
+  seller: string | null;
+  firstSeen: number;
+  /** Écart en % avec la cote, négatif = sous la cote. */
+  vsMarket: number | null;
+  url: string;
 }
 
 /**
- * Ramène un code d'état Cardmarket aux quatre niveaux du site.
+ * Les dernières offres Cardmarket, toutes cartes surveillées confondues, les
+ * plus récentes d'abord.
  *
- * L'échelle de Cardmarket est plus fine (`MT` > `NM` > `EX` > `GD` > `LP` >
- * `PL` > `PO`) ; on la replie sur celle que les autres places de marché
- * emploient déjà, plutôt que d'ajouter un cinquième libellé qui n'aurait de
- * sens que pour une source. `condition()` de `match.ts` ne peut pas s'en
- * charger : il lit des mots (« neuf », « très bon »), pas ces sigles.
+ * C'est la donnée de la colonne de droite : plutôt que de fondre Cardmarket dans
+ * le fil — où l'absence de photo par offre casse la grille — on en fait un flux
+ * de nouveautés à part, comme Cardmarket n'en offre pas. Ne lève jamais : une
+ * carte sans relevé frais est simplement absente.
  */
-export function cmCondition(code: string | null): Condition {
-  switch (code) {
-    case "MT":
-      return "neuf";
-    case "NM":
-    case "EX":
-      return "excellent";
-    case "GD":
-    case "LP":
-      return "bon";
-    case "PL":
-    case "PO":
-      return "correct";
-    default:
-      return null;
+export async function recentCardmarketOffers(
+  cards: FavoriteCard[],
+  hidden: ReadonlySet<string> = new Set(),
+  now = Date.now(),
+  limit = CARDMARKET_COLUMN_MAX,
+  maxAge = CARDMARKET_CARD_MAX_AGE_MS,
+): Promise<CardmarketRow[]> {
+  const watched = cards.filter((favorite) => favorite.cardmarket);
+  if (watched.length === 0) return [];
+
+  const snapshot = await readCardmarketCards();
+  if (!snapshot) return [];
+
+  const rows: CardmarketRow[] = [];
+  for (const favorite of watched) {
+    const found = snapshot.cards[favorite.cardId];
+    if (!found || now - found.at > maxAge) continue;
+
+    const trend = found.trend ?? null;
+    // Écartées à la main avant le plafond, pour que la suivante prenne la place
+    // de celle qu'on masque. La clé est préfixée `cardmarket:` — même stockage
+    // (`users.json`) que les masquages du fil, sans risque de collision.
+    const kept = [...found.items]
+      .filter((offer) => !hidden.has(`cardmarket:${offer.idArticle}`))
+      .sort((a, b) => (a.price ?? Infinity) - (b.price ?? Infinity))
+      .slice(0, CARDMARKET_PER_CARD);
+    for (const offer of kept) {
+      rows.push({
+        cardId: favorite.cardId,
+        name: favorite.name,
+        image: favorite.image,
+        localId: favorite.localId,
+        idArticle: offer.idArticle,
+        price: offer.price,
+        condition: offer.condition,
+        country: offer.country,
+        seller: offer.seller,
+        // Repli sur la date du relevé pour les instantanés d'avant le suivi par
+        // offre : mieux vaut « vu au dernier passage » qu'une date absente.
+        firstSeen: offer.firstSeen ?? found.at,
+        vsMarket:
+          trend && trend > 0 && offer.price !== null
+            ? Math.round(((offer.price - trend) / trend) * 100)
+            : null,
+        url: offer.url,
+      });
+    }
   }
+
+  // Les derniers ajouts d'abord ; à égalité, l'`idArticle` le plus grand, qui
+  // est aussi le plus récemment créé chez Cardmarket.
+  rows.sort(
+    (a, b) => b.firstSeen - a.firstSeen || Number(b.idArticle) - Number(a.idArticle),
+  );
+  return rows.slice(0, limit);
 }
 
 /**
