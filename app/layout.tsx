@@ -41,7 +41,11 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         </a>
 
         <header className="sticky top-0 z-40 border-b border-line bg-bg/90 backdrop-blur">
-          <div className="mx-auto flex h-14 w-full max-w-[1360px] items-center gap-3 px-4">
+          {/* Deux rangées sur mobile : logo et menu du compte en haut, recherche
+              en pleine largeur dessous. Sur une seule rangée, tout le menu était
+              `shrink-0` et c'est la recherche qui payait — écrasée à quelques
+              pixels pendant que le reste débordait de l'écran. */}
+          <div className="mx-auto flex w-full max-w-[1360px] flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2 sm:h-14 sm:flex-nowrap sm:py-0">
             <Link href="/" className="flex shrink-0 items-center gap-2" aria-label="PokeBroc">
               <span className="grid h-7 w-7 place-items-center rounded-lg bg-accent text-sm font-black text-accent-ink">
                 P
@@ -53,13 +57,17 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
 
             {/* La recherche vit dans l'en-tête : ajouter une carte est l'action
                 principale du site, elle doit rester à portée sur chaque page. */}
-            <Suspense fallback={<div className="h-9 flex-1" />}>
-              <HeaderSearch />
-            </Suspense>
+            <div className="order-last w-full min-w-0 sm:order-none sm:w-auto sm:flex-1">
+              <Suspense fallback={<div className="h-9 w-full" />}>
+                <HeaderSearch />
+              </Suspense>
+            </div>
 
-            <Suspense fallback={<div className="h-8 w-24 shrink-0" />}>
-              <AccountMenu />
-            </Suspense>
+            <div className="ml-auto shrink-0 sm:ml-0">
+              <Suspense fallback={<div className="h-8 w-24" />}>
+                <AccountMenu />
+              </Suspense>
+            </div>
           </div>
         </header>
 

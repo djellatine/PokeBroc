@@ -61,7 +61,7 @@ export default function ModeSwitch() {
             href={mode.href}
             title={mode.hint}
             aria-current={active ? "page" : undefined}
-            className={`rounded-md px-2.5 py-1 text-[13px] leading-none transition ${
+            className={`rounded-md px-2 py-1 text-[13px] leading-none transition sm:px-2.5 ${
               active ? "bg-accent/15 font-medium text-accent" : "text-faint hover:text-text"
             }`}
           >

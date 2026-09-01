@@ -83,8 +83,10 @@ export default function Lots({
   return (
     <section className="flex flex-col gap-3">
       {/* Collé sous l'en-tête, comme la barre d'outils du fil : sur une page de
-          cent lots, le titre disparaîtrait sinon dès le premier défilement. */}
-      <div className="sticky top-14 z-20 -mx-4 flex flex-wrap items-center gap-2 border-b border-line bg-bg/95 px-4 py-2 backdrop-blur">
+          cent lots, le titre disparaîtrait sinon dès le premier défilement.
+          À partir de `sm` seulement — même arbitrage que le fil : sur mobile
+          l'en-tête fait deux rangées et `top-14` ne colle plus. */}
+      <div className="z-20 -mx-4 flex flex-wrap items-center gap-2 border-b border-line bg-bg/95 px-4 py-2 backdrop-blur sm:sticky sm:top-14">
         <h1 className="mr-1 text-sm font-bold">
           Lots
           <span className="ml-2 text-[11px] font-normal text-faint">
@@ -357,7 +359,7 @@ function Controls({
     <div className="flex flex-wrap items-center gap-2">
       <span className="text-[11px] text-faint">{count > 0 ? plural(count, "lot") : "aucun lot"}</span>
 
-      <label className="control ml-auto cursor-pointer">
+      <label className="control cursor-pointer sm:ml-auto">
         <span className="text-faint">Tri</span>
         <select
           value={sort}

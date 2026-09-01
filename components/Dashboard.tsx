@@ -480,9 +480,13 @@ export default function Dashboard({
       <div className="flex flex-col gap-6 xl:flex-row xl:items-start">
       <section className="flex min-w-0 flex-1 flex-col gap-3">
         {/* Collée sous l'en-tête : sur un fil de deux cents lignes, retrouver le
-            tri imposait sinon de remonter tout en haut. */}
-        <div className="sticky top-14 z-20 -mx-4 flex flex-wrap items-center gap-2 border-y border-line bg-bg/95 px-4 py-2 backdrop-blur">
-          <h2 className="mr-1 text-sm font-bold">
+            tri imposait sinon de remonter tout en haut. À partir de `sm`
+            seulement — sur un téléphone, les filtres s'étalent sur trois ou
+            quatre rangées et une barre sticky de cette hauteur mangeait la
+            moitié de l'écran. `top-14` suppose l'en-tête sur une rangée, ce qui
+            n'est vrai qu'à partir de `sm` aussi. */}
+        <div className="z-20 -mx-4 flex flex-wrap items-center gap-2 border-y border-line bg-bg/95 px-4 py-2 backdrop-blur sm:sticky sm:top-14">
+          <h2 className="mr-1 w-full text-sm font-bold sm:w-auto">
             {selected ? (cards[selected]?.name ?? "Carte") : "Les offres du moment"}
             <span className="ml-2 text-[11px] font-normal text-faint">
               {plural(rows.length, "annonce")}
@@ -539,11 +543,17 @@ export default function Dashboard({
             Élargir
           </Toggle>
 
-          <div className="ml-auto flex items-center gap-2">
+          {/* `w-full` sur mobile : le `ml-auto` seul laissait le groupe se
+              glisser dans les trous de la rangée précédente, chiffres
+              d'avancement pliés à la verticale compris. */}
+          <div className="flex w-full flex-wrap items-center gap-2 sm:ml-auto sm:w-auto">
             <ViewSwitch value={view} onChange={setView} />
 
             {loading && (
-              <span className="flex items-center gap-1.5 text-[11px] text-faint" aria-live="polite">
+              <span
+                className="flex items-center gap-1.5 whitespace-nowrap text-[11px] text-faint"
+                aria-live="polite"
+              >
                 <span
                   className="h-3 w-3 animate-spin rounded-full border-2 border-line border-t-accent"
                   aria-hidden
