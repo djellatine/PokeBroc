@@ -1113,6 +1113,7 @@ deploy/
   tablette/
     lancer.sh               les unités rejouées sans systemd — site, collecte, sauvegarde
     boot.sh                 démarrage automatique via Termux:Boot
+    LISEZMOI.md             dossier de bord du serveur tablette — chemins, pannes, remèdes
 tests/                      node:test — match, ebay, rate-limit, sightings, format, alertes, store
                             collect/test_lbc.py — normalisation et rotation, sans réseau
 ```
