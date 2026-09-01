@@ -343,22 +343,38 @@ class Browser:
             # Hors du bureau visible, sans être headless : le compromis
             # « invisible mais crédible » face à Cloudflare.
             args.append("--window-position=-2400,-2400")
+        # Sous proot (la tablette), le processus se croit root et le bac à
+        # sable de Chromium ne peut pas s'établir : sans ce drapeau, le
+        # navigateur refuse même de démarrer. `geteuid` n'existe pas sous
+        # Windows, où la question ne se pose pas.
+        if getattr(os, "geteuid", lambda: 1)() == 0:
+            args.append("--no-sandbox")
 
-        try:
-            self._ctx = self._play.chromium.launch_persistent_context(
-                user_data_dir=str(profile),
-                channel="msedge",
-                headless=headless,
-                args=args,
-                ignore_default_args=["--enable-automation"],
-                viewport={"width": 1280, "height": 900},
-            )
-        except Exception as error:
+        # Edge d'abord — il passe Cloudflare mieux que Chromium. Mais il
+        # n'existe pas partout (pas de build Linux ARM64, donc pas de tablette) :
+        # à défaut, le Chromium que Playwright embarque fait l'affaire, quitte à
+        # devoir lever un défi à la main un peu plus souvent.
+        derniere_erreur: Exception | None = None
+        for canal in ("msedge", None):
+            try:
+                self._ctx = self._play.chromium.launch_persistent_context(
+                    user_data_dir=str(profile),
+                    headless=headless,
+                    args=args,
+                    ignore_default_args=["--enable-automation"],
+                    viewport={"width": 1280, "height": 900},
+                    **({"channel": canal} if canal else {}),
+                )
+                break
+            except Exception as error:
+                derniere_erreur = error
+        else:
             self._play.stop()
             raise RuntimeError(
-                f"Impossible de lancer Edge ({error}). Edge est-il installé, "
-                f"et le profil `{profile}` n'est-il pas déjà ouvert ailleurs ?"
-            ) from error
+                f"Impossible de lancer un navigateur ({derniere_erreur}). "
+                f"Edge ou le Chromium de Playwright sont-ils installés, et le "
+                f"profil `{profile}` n'est-il pas déjà ouvert ailleurs ?"
+            ) from derniere_erreur
         self._page = self._ctx.pages[0] if self._ctx.pages else self._ctx.new_page()
 
     def fetch_offers(self, url: str) -> tuple[list[dict], bool]:

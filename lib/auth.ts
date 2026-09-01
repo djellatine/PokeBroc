@@ -111,7 +111,12 @@ export async function createSession(userId: string): Promise<void> {
   store.set(COOKIE, await createToken(userId), {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    // `SESSION_HTTP=1` : le site est servi en HTTP assumé — réseau local ou
+    // Tailscale, déjà chiffré de bout en bout. Sans cette échappatoire, le
+    // cookie `secure` serait silencieusement refusé par le navigateur et toute
+    // connexion impossible, sans un mot d'erreur. Ne jamais le poser derrière
+    // un domaine public.
+    secure: process.env.NODE_ENV === "production" && process.env.SESSION_HTTP !== "1",
     path: "/",
     maxAge: MAX_AGE_S,
   });

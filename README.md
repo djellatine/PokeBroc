@@ -465,6 +465,12 @@ cheval sur deux fenêtres.
 Définissez `SESSION_SECRET` en production. Sans elle, une clé est générée dans
 `.data/session-secret` afin que les sessions survivent à un redémarrage.
 
+`SESSION_HTTP=1` retire le drapeau `secure` du cookie de session, pour un site
+servi en HTTP assumé — réseau local ou Tailscale, déjà chiffrés. Sans cette
+échappatoire, le navigateur refuserait silencieusement le cookie et toute
+connexion serait impossible, sans un mot d'erreur. Ne jamais le poser derrière
+un domaine public.
+
 > Le stockage fichier suppose **un seul processus Node** — la limitation de débit aussi, son compteur
 > vivant en mémoire. Pour un déploiement multi-instance, remplacez `lib/store.ts` : sa surface est
 > déjà asynchrone et ignore le support.
@@ -517,6 +523,12 @@ fenêtre **hors écran** par défaut — invisible, mais bien meilleur que *head
 et `--visible` quand un défi doit être levé à la main. Aucun script ne coche un CAPTCHA : au premier
 usage ou après un durcissement, `python collect/cardmarket.py --visible --resolve` une fois.
 
+Là où Edge n'existe pas — Linux ARM64, donc la tablette —, le collecteur se rabat sur le **Chromium
+que Playwright embarque**, quitte à lever un défi à la main un peu plus souvent, et ajoute
+`--no-sandbox` quand il se croit root : sous proot, le bac à sable de Chromium ne peut pas s'établir
+et le navigateur refuserait même de démarrer. La fenêtre « hors écran » exige un serveur X, que
+`deploy/tablette/lancer.sh` fournit avec Xvfb.
+
 Lancer Edge par Playwright pose par défaut `--enable-automation`, donc
 `navigator.webdriver = true` — que Cloudflare lit, et son défi tourne alors en boucle même quand on
 coche la case à la main. On l'efface (`ignore_default_args=["--enable-automation"]` +
@@ -532,10 +544,10 @@ quelques offres par carte (`CARDMARKET_PER_CARD`) pour qu'activer une carte ne n
 se trie (récentes / prix / écart), s'écarte offre par offre (une croix, même stockage que les
 masquages du fil) et se rafraîchit seule via `GET /api/cardmarket`, sans recharger la page.
 
-Cette collecte ne peut tourner que sur une machine à Edge et IP résidentielle — jamais sur le serveur
-Linux, où `CARDMARKET_PYTHON` est absent et le balayage de la veille reste un no-op. Sous Windows, la
-tâche planifiée `PokeBroc Cardmarket` la relance toutes les 15 min ; `collecte-cardmarket.bat` en est
-le lanceur.
+Cette collecte exige une **IP résidentielle** — jamais un serveur de datacenter, où
+`CARDMARKET_PYTHON` reste absent et le balayage de la veille un no-op. Sous Windows, la tâche
+planifiée `PokeBroc Cardmarket` la relance toutes les 15 min ; `collecte-cardmarket.bat` en est le
+lanceur. Sur la tablette, c'est le repli Chromium ci-dessus qui la rend possible.
 
 L'**API officielle** aurait été plus propre (30 000 requêtes/jour), mais elle est réservée aux
 vendeurs professionnels et n'accepte plus de nouvelles demandes (vérifié le 31 août 2026) : le
@@ -855,10 +867,12 @@ Trois contraintes décident de la forme, et elles sont toutes mesurées plus hau
   collecteur leboncoin. Il faut une machine, pas une fonction.
 - Le HTTPS n'est pas facultatif : `lib/auth.ts` pose le cookie de session avec `secure` en
   production, et aucun navigateur ne le renverrait en clair. Sans certificat, personne ne peut se
-  connecter — pas même vous.
+  connecter — pas même vous. La seule échappatoire est `SESSION_HTTP=1`, réservée aux réseaux déjà
+  chiffrés ou de confiance (voir plus haut).
 
-D'où un VPS et rien de plus exotique. `deploy/` contient tout : sept unités systemd, un Caddyfile,
-un installateur et un script de déploiement.
+D'où un VPS — ou la tablette de la variante ci-dessous — et rien de plus exotique. `deploy/`
+contient tout : sept unités systemd, un Caddyfile, un installateur, un script de déploiement, et le
+lanceur de la tablette.
 
 ### Ce qui tourne sur le serveur
 
@@ -893,6 +907,36 @@ bash /tmp/pokebroc/deploy/installer.sh votre-domaine.fr
 L'installateur est idempotent : le relancer ne touche ni `.data/` ni `.env.local`. Il termine en
 rappelant les trois choses qu'il ne peut pas faire à votre place — l'enregistrement DNS, les
 secrets, et la clé publique de déploiement.
+
+### La variante tablette
+
+L'alternative au VPS, retenue le 1er septembre 2026 : une tablette Android (Blackview Tab 13) sur
+la box, qui fait tourner **tout** — site, veille, leboncoin, Cardmarket. Son argument décisif est
+son **IP résidentielle** : la question Datadome ci-dessous ne se pose plus, et le collecteur
+Cardmarket — qui exige lui aussi une ligne de particulier — tourne sur la même machine que le site,
+là où le VPS l'aurait laissé orphelin. Environ 5 W, branchée en permanence.
+
+La pile : Termux (depuis **F-Droid** — la version Play Store est morte) + `proot-distro` qui loge
+un vrai Debian ARM64, sans root. Dedans : Node 22, le dépôt dans `/root/PokeBroc`, un venv Python
+dans `/root/venv` (`curl_cffi`, `playwright` + Chromium — Edge n'existant pas en Linux ARM64, voir
+le repli plus haut). Vérifié sur la tablette le 1er septembre 2026 : Chromium se lance sous proot
+avec `--no-sandbox`, et `lbc.py --dry-run` ramène ses annonces sans un 403.
+
+proot n'a pas de systemd : `deploy/tablette/lancer.sh` rejoue les unités en un seul superviseur —
+site relancé s'il tombe, veille puis leboncoin enchaînés à chaque quart d'heure (l'enchaînement
+remplace le décalage de cinq minutes des minuteries), sauvegarde quotidienne vers 4 h dans
+`/root/sauvegardes`, quatorze conservées, journaux dans `/root/journal`. Il exporte ce que le
+`.env.local` copié du PC dit en chemins Windows (`LBC_PYTHON`, `CARDMARKET_PYTHON`), pose
+`SESSION_HTTP=1` (voir plus haut : servi en HTTP local ou Tailscale, pas de HTTPS) et démarre un
+Xvfb pour la fenêtre hors écran de Cardmarket. `deploy/tablette/boot.sh`, copié dans
+`~/.termux/boot/`, relance le tout à chaque redémarrage d'Android via Termux:Boot — après avoir
+pris le `termux-wake-lock`, sans lequel Android endort le processeur. Exempter Termux de
+l'optimisation de batterie, sans quoi la surcouche tue le processus en silence.
+
+L'accès distant passe par Tailscale (les applis Android sur la tablette et le téléphone) : pas de
+port ouvert sur la box, pas de domaine, pas de certificat. Ouvrir le site à d'autres personnes
+demanderait un domaine public et un tunnel — c'est documenté comme suite envisageable, pas en
+place.
 
 ### Le domaine
 
@@ -963,6 +1007,10 @@ depuis une ligne de particulier — la veille tournera donc sans histoire.
 Ce qui reste inconnu, et que cette mise en ligne va justement trancher : le runner était
 **américain** pour un site franco-français. Le pays et le centre de données avaient changé ensemble,
 et rien ne disait lequel des deux pesait. Un VPS français peut très bien passer.
+
+La variante tablette échappe entièrement à la question — mesuré le 1er septembre 2026 depuis l'IP
+de la box, `lbc.py --dry-run` ramène ses annonces sans un refus. Le paragraphe qui suit ne
+concerne que le VPS.
 
 En cas d'échec, il n'y a rien à réparer dans l'urgence : `lib/lbc.ts` refuse un instantané de plus
 d'une heure et demie, la source disparaît du flux des lots, et le reste du site continue. Les recours, dans
@@ -1054,6 +1102,7 @@ lib/
 collect/
   lbc.py                    collecteur leboncoin — lots, puis une tranche des cartes suivies
   test_lbc.py               ses tests, sans réseau
+  cardmarket.py             collecteur Cardmarket — navigateur piloté, Edge ou Chromium
   veille.ts                 balayage de fond + alertes — hors du site, sur minuterie
 deploy/
   installer.sh              provisionnement d'un VPS neuf, une seule fois
@@ -1061,6 +1110,9 @@ deploy/
   sauvegarde.sh             archive .data/ chaque nuit, 14 jours glissants
   Caddyfile                 reverse proxy et HTTPS automatique
   pokebroc*.service/.timer  le site et ses trois minuteries
+  tablette/
+    lancer.sh               les unités rejouées sans systemd — site, collecte, sauvegarde
+    boot.sh                 démarrage automatique via Termux:Boot
 tests/                      node:test — match, ebay, rate-limit, sightings, format, alertes, store
                             collect/test_lbc.py — normalisation et rotation, sans réseau
 ```
