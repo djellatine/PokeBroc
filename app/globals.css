@@ -137,6 +137,9 @@ body {
   background: var(--panel-2);
   color: var(--dim);
   font-size: 13px;
+  /* Un contrôle est un mot, pas un paragraphe : sur mobile, « Tout marquer
+     comme vu » se pliait sur trois lignes dans son propre bouton. */
+  white-space: nowrap;
   transition:
     border-color 0.15s,
     color 0.15s,

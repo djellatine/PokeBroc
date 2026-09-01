@@ -89,6 +89,23 @@ paramètres. Un témoin est resté en place pour le jour où ça changerait :
 boot réussi — si `cat ~/boot-temoin.txt` affiche une date récente après un
 redémarrage, l'automatique est revenu.
 
+## Mettre à jour le site après des modifs
+
+Le circuit : les modifs se font sur le PC, sont poussées sur GitHub, et la
+tablette les tire. **Un pull ne suffit pas toujours** — le site sert ce que
+`npm run build` a construit, pas les sources. Deux cas :
+
+- **La modif touche le site** (`app/`, `lib/`, `components/`) : Ctrl+C dans la
+  session du superviseur, puis
+  `proot-distro login debian -- bash -c "cd /root/PokeBroc && git pull && npm run build"`
+  (15-30 min), puis **bouton PokeBroc**.
+- **La modif ne touche que `collect/` ou la doc** : un simple
+  `proot-distro login debian -- bash -c "cd /root/PokeBroc && git pull"`,
+  sans rien arrêter — les collecteurs repartent à neuf à chaque quart d'heure
+  et prendront la nouvelle version au passage suivant.
+
+En cas de doute : le premier cas marche toujours, il coûte juste le build.
+
 ## Diagnostiquer une panne
 
 Depuis Termux, dans l'ordre :
