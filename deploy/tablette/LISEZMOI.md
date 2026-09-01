@@ -58,7 +58,25 @@ d'heure, sauvegarde vers 4 h du matin, un Xvfb pour Cardmarket, et un verrou
 - **Arrêter** : Ctrl+C dans la session où il tourne (la barre de touches de
   Termux a le bouton CTRL).
 - **Après un redémarrage de la tablette, rien ne repart tout seul** : voir
-  ci-dessous. Un appui sur le bouton suffit.
+  ci-dessous. **Un appui sur le bouton PokeBroc suffit** — c'est le seul geste
+  à retenir. Le verrou rend un double appui inoffensif, le site met une à deux
+  minutes à répondre, et Tailscale se reconnecte de lui-même.
+
+### Accéder au site
+
+- **Sur la tablette** : `http://localhost:3000`.
+- **Depuis le téléphone, à la maison** (même Wi-Fi) : `http://192.168.1.XX:3000`
+  — l'IP est dans Paramètres → Wi-Fi → le réseau connecté → « Adresse IP »,
+  ou dans le journal du site, qui l'affiche en démarrant :
+  `proot-distro login debian -- grep -i network /root/journal/site.log`
+- **Depuis n'importe où (4G compris)** : Tailscale. L'appli (Play Store) sur la
+  tablette **et** le téléphone, connectée au **même compte** sur les deux ;
+  l'appli du téléphone liste alors la tablette avec son adresse `100.x.y.z` →
+  ouvrir `http://100.x.y.z:3000` (ou `http://<nom-de-la-tablette>:3000` via
+  MagicDNS). Aucun port ouvert sur la box, personne d'autre ne peut joindre le
+  site. L'adresse `192.168...`, elle, ne marche **que** sur le Wi-Fi de la box.
+- La connexion au compte en HTTP ne tient que grâce à `SESSION_HTTP=1` — déjà
+  posé par le lanceur, rien à faire.
 
 ### Le démarrage automatique, et pourquoi il ne marche pas
 
@@ -116,8 +134,8 @@ doublons). Le site met une à deux minutes à répondre sur ce processeur.
   afficher `--visible` sur l'écran de la tablette. Si le navigateur part en
   vrille, supprimer `.data/cardmarket/profil` (profil hérité du Edge Windows)
   et recommencer.
-- **Tailscale** : pas encore installé — donnera une adresse stable
-  (`http://pokebroc:3000`) depuis n'importe où, téléphone compris.
+- **Tailscale** : installation lancée le 1er septembre 2026 (voir « Accéder au
+  site » ci-dessus pour la marche à suivre complète).
 - **Côté PC** : les deux tâches planifiées Windows « PokeBroc Cardmarket » et
   « PokeBroc-LBC » ont été **désactivées** le 1er septembre 2026
   (`schtasks /change /tn "PokeBroc-LBC" /enable` pour les réveiller). Le
