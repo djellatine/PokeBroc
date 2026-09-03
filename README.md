@@ -296,6 +296,21 @@ les cartes d'avant 2008 n'ont pas de numéro de collection du tout — elles se 
 et « carte pokemon japonaise », la notation trie. Les extensions nommées en anglais se cherchent
 par leurs mots, comme les françaises, et « McDonald's » vaut aussi « McDo » et « MacDo », que les
 vendeurs écrivent bien plus volontiers.
+
+Enfin, **les japonaises se cherchent aussi sous leur nom anglais**. Mesuré le 3 septembre 2026 sur
+la Carapuce McDonald's de 2002 (007/018) :
+
+| Requête | Vinted | eBay |
+| --- | --- | --- |
+| `Carapuce 007/018` | 0 annonce de la carte | 0 de la carte, 27 « fortes » qui sont des 007/165 |
+| `Squirtle 007/018` | 1, la vraie, à 2 199 € | 32 fortes, la vraie en tête |
+
+La seule annonce Vinted réelle est titrée en anglais, et eBay en aligne une centaine sous
+« squirtle mc donald 2002 ». La notation reconnaissait déjà le nom anglais ; c'est la requête qui
+restait française. `englishQuery` compose donc la même requête sous le nom anglais, pour les
+japonaises dont il diffère du français — pas pour Pikachu, pas pour une Dresseur, jamais pour une
+française. Vinted, sans quota, reçoit les deux noms, deux passes chacun ; eBay, compté à 5 000
+appels par jour, reçoit l'anglais **à la place** du français, qui n'y trouvait rien de plus.
 Pour le visuel, deux replis, dans cet ordre. TCGdex donne l'identifiant TCGplayer de chaque
 tirage, et TCGplayer sert l'image par cet identifiant seul : `getCard` le range dans `image` sous
 la forme `tcgplayer:587758`, que seule `cardImage` sait lire. Mais TCGplayer n'a ni les anciennes

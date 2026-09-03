@@ -23,6 +23,7 @@ import { readLbcForCard, refreshLbcLive, type LbcItem } from "./lbc";
 import {
   bestQuery,
   condition,
+  englishQuery,
   scoreAll,
   WIDE_SCORE,
   STRONG_SCORE,
@@ -291,18 +292,31 @@ async function collect(
     // une liste vide, ce qui est le cas courant hors des cartes « précieuses ».
     // Les deux passes partent ensemble ; les clients les sérialisent de toute
     // façon, mais on n'attend pas la première pour poster la seconde.
+    // Une carte japonaise se vend aussi — souvent surtout — sous son nom
+    // anglais : voir `englishQuery`. Vinted, sans quota, reçoit les deux noms ;
+    // eBay, international et compté à 5 000 appels par jour, reçoit l'anglais
+    // à la place du français, qui n'y trouvait rien de plus.
+    const english = englishQuery(card);
+
     if (source === "vinted") {
-      const [relevant, newest] = await Promise.all([
-        searchVinted({ query, order: "relevance", perPage: 48, fresh: live }),
-        searchVinted({ query, order: "newest_first", perPage: 48, fresh: live }),
-      ]);
-      const scored = scoreAll([...relevant.items, ...newest.items], card);
+      const queries = english ? [query, english] : [query];
+      const pages = await Promise.all(
+        queries.flatMap((text) => [
+          searchVinted({ query: text, order: "relevance", perPage: 48, fresh: live }),
+          searchVinted({ query: text, order: "newest_first", perPage: 48, fresh: live }),
+        ]),
+      );
+      const scored = scoreAll(
+        pages.flatMap((page) => page.items),
+        card,
+      );
       return { items: scored.map((item) => fromVinted(item, card.id)), error: null };
     }
 
+    const ebayQuery = english ?? query;
     const [relevant, newest] = await Promise.all([
-      searchEbay({ query, order: "best_match", perPage: 50, fresh: live }),
-      searchEbay({ query, order: "newly_listed", perPage: 50, fresh: live }),
+      searchEbay({ query: ebayQuery, order: "best_match", perPage: 50, fresh: live }),
+      searchEbay({ query: ebayQuery, order: "newly_listed", perPage: 50, fresh: live }),
     ]);
     const scored = scoreAll([...relevant.items, ...newest.items], card);
     return { items: scored.map((item) => fromEbay(item, card.id)), error: null };

@@ -11,6 +11,7 @@ import {
   WIDE_SCORE,
   bestQuery,
   condition,
+  englishQuery,
   normalize,
   scoreItem,
   searchName,
@@ -549,5 +550,30 @@ describe("scoreItem — nom sans homonyme", () => {
       scoreItem(makeItem({ title: "Dracaufeu Gold Star 100/101" }), DRACAUFEU_STAR).match.unique,
       false,
     );
+  });
+});
+
+describe("englishQuery", () => {
+  it("compose la même requête sous le nom anglais d'une japonaise", () => {
+    assert.equal(englishQuery(SALAMECHE_MCDO_JA), "Charmander 004/018");
+    assert.equal(englishQuery(PHYLLALI_JA), "Leafeon ex 003/187");
+  });
+
+  it("ne rend rien quand l'anglais ne dit rien de plus", () => {
+    // Pikachu s'appelle Pikachu partout.
+    assert.equal(englishQuery(PIKACHU_JA), null);
+    // Une Dresseur n'a pas de nom anglais connu.
+    assert.equal(englishQuery(NANJAMO_JA), null);
+    // Les françaises n'en ont pas besoin.
+    assert.equal(englishQuery(DRACAUFEU), null);
+  });
+
+  it("ratisse large, en anglais, une carte sans numéro", () => {
+    assert.equal(englishQuery(SALAMECHE_1996_JA), "Charmander japanese pokemon card");
+  });
+
+  it("figure parmi les suggestions de la fiche", () => {
+    const queries = suggestedQueries(SALAMECHE_MCDO_JA).map((entry) => entry.query);
+    assert.ok(queries.includes("Charmander 004/018"));
   });
 });

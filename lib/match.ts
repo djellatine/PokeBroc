@@ -728,6 +728,27 @@ export function bestQuery(card: CardDetail): string {
 }
 
 /**
+ * La même requête, sous le nom anglais — pour les cartes japonaises, et
+ * seulement quand il diffère du français.
+ *
+ * Mesuré le 3 septembre 2026 sur la Carapuce McDonald's de 2002 (007/018) :
+ * « Carapuce 007/018 » ne rend aucune annonce de la carte, ni sur Vinted ni
+ * sur eBay, et « Squirtle 007/018 » en rend sur les deux — la seule annonce
+ * Vinted réelle est titrée en anglais, et eBay en aligne trente-deux. Les
+ * japonaises se vendent sous leur nom anglais bien plus souvent que les
+ * françaises, qui n'en ont pas besoin. `null` quand rien n'est à gagner : une
+ * Pikachu s'appelle Pikachu partout, une Dresseur n'a pas de nom anglais.
+ */
+export function englishQuery(card: CardDetail): string | null {
+  if (card.lang !== "ja" || !card.nameEn) return null;
+  const english = searchName({ ...card, name: card.nameEn });
+  if (normalize(english) === normalize(searchName(card))) return null;
+  const printed = cardNumber(card);
+  if (printed) return `${english} ${printed}`;
+  return `${english} japanese pokemon card`;
+}
+
+/**
  * Requêtes destinées à faire remonter des lots.
  *
  * `bestQuery` ne les trouve pas, et ce n'est pas un défaut : elle cherche
@@ -777,6 +798,8 @@ export function suggestedQueries(card: CardDetail): { label: string; query: stri
     if (named && card.set?.id) {
       out.push({ label: `Nom + ${card.set.id}`, query: `${name} ${card.set.id}` });
     }
+    const english = englishQuery(card);
+    if (english) out.push({ label: "Nom anglais", query: english });
     return out;
   }
 
