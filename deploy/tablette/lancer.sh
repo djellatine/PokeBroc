@@ -169,10 +169,11 @@ mettre_a_jour() {
   cible=$(git rev-parse origin/main)
   [ "$courant" = "$cible" ] && return 0
 
-  # `npm` réécrit package-lock.json à sa façon sur cette plateforme ; ce n'est
-  # pas une modification qu'on veut garder. Toute autre modification locale,
-  # si : on ne tire pas par-dessus, on le dit.
-  git checkout --quiet -- package-lock.json 2>/dev/null
+  # `npm` réécrit package-lock.json à sa façon sur cette plateforme, et
+  # `next build` ajoute à tsconfig.json le dossier de types de `.next-nouveau` :
+  # deux modifications qu'on ne veut pas garder. Toute autre, si : on ne tire
+  # pas par-dessus, on le dit.
+  git checkout --quiet -- package-lock.json tsconfig.json 2>/dev/null
   if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
     echo "mise à jour : le dépôt porte des modifications locales, on n'y touche pas"
     git status --short --untracked-files=no
