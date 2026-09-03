@@ -1197,6 +1197,7 @@ app/
   api/lots/recents/route.ts rafraîchissement du flux des lots
   api/vinted/route.ts       recherche Vinted + notation (fiche carte)
 proxy.ts                    limitation de débit devant /api/*
+JOURNAL.md                  journal de bord : ce qui a été fait, séance par séance, et ce qui reste
 components/
   Dashboard.tsx             collection, filtres et fil — l'état partagé de l'accueil
   Lots.tsx                  page des lots : liste unique, tri et filtres

@@ -3,7 +3,8 @@
 Tout ce qu'il faut savoir pour dépanner l'hébergement de PokeBroc sur la
 tablette, tel qu'il a été monté le 1er septembre 2026. Le *pourquoi* des choix
 est dans le README (section « La variante tablette ») ; ici, c'est le *comment*
-et le *où*, pour retrouver ses petits un jour de panne.
+et le *où*, pour retrouver ses petits un jour de panne. Le fil des séances de
+travail, lui, est dans `JOURNAL.md` à la racine du dépôt.
 
 ## La machine
 
