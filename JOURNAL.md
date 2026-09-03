@@ -114,6 +114,9 @@ tablette se met à jour toute seule dès qu'on pousse sur `main`.
   navigateur s'ouvrait hors écran (position retenue des passages invisibles) :
   corrigé dans `cardmarket.py`. Une fois la case cochée, les pages Cardmarket
   se chargent sans défi et le collecteur relève les offres.
+- **Mesuré** : passage visible d'amorçage, 4 cartes sur 5 et 69 offres ; passage
+  automatique invisible suivant (23:01), **5 cartes, 100 offres, aucun défi** en
+  115 s. Le bandeau « IP surchauffée » est tombé avec lui.
 
 ### Reste à faire, ou à surveiller
 
