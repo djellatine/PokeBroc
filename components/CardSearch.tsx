@@ -68,7 +68,9 @@ export default function CardSearch({
   // Quand la liste du serveur change, on oublie les affichages anticipés qu'elle
   // confirme. Ajusté pendant le rendu plutôt que dans un effet : pas de passage
   // par un état intermédiaire visible.
-  const serverKey = favoriteIds.join("|");
+  // En JSON : un identifiant Bulbapedia porte une barre, qui n'est donc pas un
+  // séparateur sûr.
+  const serverKey = JSON.stringify(favoriteIds);
   const [seenKey, setSeenKey] = useState(serverKey);
   if (seenKey !== serverKey) {
     setSeenKey(serverKey);

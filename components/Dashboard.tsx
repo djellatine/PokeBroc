@@ -193,7 +193,11 @@ export default function Dashboard({
   /** Idem pour le rattrapage automatique, remplacé quand la liste change. */
   const catchUp = useRef<AbortController | null>(null);
 
-  const staleKey = initialStaleIds.join("|");
+  // En JSON et non joint par une barre : l'identifiant d'une carte Bulbapedia
+  // en contient une — `jb:Charmander (McDonald Pack 4)|004/018` — et la barre
+  // le coupait en deux, d'où un rattrapage lancé sur une carte inexistante et
+  // un fil vide pour la vraie.
+  const staleKey = JSON.stringify(initialStaleIds);
 
   // La liste des cartes à rattraper a changé : on repart d'un avancement neuf.
   // Ajusté pendant le rendu plutôt que dans un effet, pour ne pas afficher une
@@ -284,7 +288,7 @@ export default function Dashboard({
    * résultat étant de toute façon écrit sur le disque avant de répondre.
    */
   useEffect(() => {
-    const ids = staleKey ? staleKey.split("|") : [];
+    const ids = JSON.parse(staleKey) as string[];
     if (ids.length === 0) return;
 
     catchUp.current?.abort();
