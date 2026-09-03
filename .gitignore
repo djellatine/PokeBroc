@@ -46,3 +46,6 @@ __pycache__/
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# constructions de la mise à jour automatique de la tablette (voir deploy/tablette/lancer.sh)
+.next-*/

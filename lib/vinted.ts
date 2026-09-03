@@ -11,6 +11,13 @@ const HOST = "https://www.vinted.fr";
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
+/**
+ * Délai maximal d'une requête. Sans lui, une connexion muette bloque la veille
+ * jusqu'à ce que le lanceur la tue à trois minutes — et un passage tué n'écrit
+ * ni instantané ni journal. Vingt secondes : Vinted répond d'ordinaire en une.
+ */
+const REQUEST_TIMEOUT_MS = 20_000;
+
 const SESSION_TTL_MS = 9 * 60 * 1000;
 const MIN_INTERVAL_MS = 350;
 const CACHE_TTL_MS = 90 * 1000;
@@ -87,6 +94,7 @@ async function openSession(): Promise<string> {
     },
     redirect: "follow",
     cache: "no-store",
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
 
   const jar = new Map<string, string>();
@@ -267,6 +275,7 @@ async function call(url: string, cookie: string): Promise<Response> {
       "X-Requested-With": "XMLHttpRequest",
     },
     cache: "no-store",
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
 }
 

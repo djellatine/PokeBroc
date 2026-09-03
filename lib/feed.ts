@@ -32,7 +32,8 @@ import {
 } from "./match";
 import { recordSightings } from "./sightings";
 import type { FavoriteCard } from "./store";
-import { getCard, type CardDetail } from "./tcgdex";
+import { loadCard } from "./card-cache";
+import type { CardDetail } from "./tcgdex";
 import { searchVinted, type VintedItem } from "./vinted";
 
 const DIR = path.join(DATA_DIR, "feed");
@@ -350,18 +351,25 @@ export async function refreshCard(
     const existing = await readSnapshot(favorite.cardId);
     if (!force && isFresh(existing, now)) return existing as Snapshot;
 
-    const card = await getCard(favorite.cardId);
+    // Du disque d'abord, du catalogue ensuite, et la copie même vieille quand
+    // le catalogue ne répond pas : voir `lib/card-cache.ts` — c'est ce qui a
+    // rendu la veille aveugle une journée entière.
+    const loaded = await loadCard(favorite.cardId, now);
+    const card = loaded.card;
     if (!card) {
       const failed: Snapshot = {
         card: fallbackCard(favorite),
         at: now,
         query: "",
         items: existing?.items ?? [],
-        error: "Carte introuvable dans la base TCGdex.",
+        error: loaded.error ?? "Carte introuvable dans la base TCGdex.",
       };
       await writeJson(file(favorite.cardId), failed);
       return failed;
     }
+    // La fiche vient d'une copie périmée : la collecte a lieu, mais le fil le
+    // dit — la cote peut avoir un jour de retard.
+    const notes = loaded.stale && loaded.error ? [`${loaded.error} — fiche en copie réutilisée`] : [];
 
     const feedCard: FeedCard = {
       cardId: card.id,
@@ -441,7 +449,7 @@ export async function refreshCard(
       // Une seule place de marché en panne : le fil reste servi par l'autre, et
       // l'instantané reste daté de maintenant — le signaler sans le traiter
       // comme un échec de collecte, sinon la carte serait rejouée en boucle.
-      ...(errors.length > 0 ? { partial: errors.join(" · ") } : {}),
+      ...(errors.length + notes.length > 0 ? { partial: [...errors, ...notes].join(" · ") } : {}),
     };
     await writeJson(file(card.id), snapshot);
     return snapshot;

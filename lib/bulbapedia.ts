@@ -314,6 +314,9 @@ async function fetchWikitext(page: string): Promise<string | null> {
       const res = await fetch(url, {
         headers: { "User-Agent": BULBA_USER_AGENT, Accept: "application/json" },
         next: { revalidate: 86400 },
+        // Un wiki de bénévoles a ses lenteurs ; passé vingt secondes, on
+        // considère la page injoignable plutôt que de bloquer la veille.
+        signal: AbortSignal.timeout(20_000),
       });
       if (!res.ok) return null;
       const json = (await res.json()) as { parse?: { wikitext?: { "*": string } } };

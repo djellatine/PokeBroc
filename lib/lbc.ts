@@ -26,7 +26,7 @@ import { promisify } from "node:util";
 import { DATA_DIR, readJson, writeJson } from "./json-file";
 import { bestQuery } from "./match";
 import type { FavoriteCard } from "./store";
-import { getCard } from "./tcgdex";
+import { loadCard } from "./card-cache";
 
 /** Doit rester identique au chemin par défaut de `collect/lbc.py`. */
 const FILE = path.join(DATA_DIR, "lbc", "recents.json");
@@ -214,7 +214,9 @@ export async function writeLbcQueries(cards: FavoriteCard[]): Promise<LbcQuery[]
   const queries: LbcQuery[] = [];
 
   for (const favorite of cards) {
-    const card = await getCard(favorite.cardId);
+    // La copie locale d'abord — voir `lib/card-cache.ts` : un catalogue muet
+    // laissait sinon le collecteur sans aucune requête, un passage sur deux.
+    const { card } = await loadCard(favorite.cardId);
     // Une carte absente de TCGdex n'a pas de numéro imprimé, donc pas de
     // requête discriminante. La sauter vaut mieux que chercher son nom nu, qui
     // ramènerait 35 annonces sans rapport à noter pour rien.

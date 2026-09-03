@@ -541,6 +541,19 @@ Deux alertes qui passaient à la trappe, relevées le 3 septembre 2026 :
   Sur ces cartes, le nom vaut le numéro (`unique` dans `MatchSignals`). Les autres raretés à nom —
   ex, GX, V — existent en dix versions par espèce et ne bénéficient pas de la règle.
 
+Et la troisième trappe, la plus large, lue dans le journal de la tablette le soir même : « 47 cartes
+balayées, 0 alerte envoyée — 48 erreurs : Carte introuvable dans la base TCGdex », à presque
+chaque passage depuis la veille au soir, alors que TCGdex répondait en 350 ms dès qu'on
+l'interrogeait à la main. Un hoquet intermittent du catalogue rendait *chaque* carte introuvable,
+donc rien n'était collecté ni annoncé, parce que rien ne retenait la fiche lue au passage
+précédent — et que, hors de Next, `fetch` n'a aucun cache. D'où `lib/card-cache.ts` : une copie de
+chaque fiche dans `.data/cards/`, servie tant qu'elle a moins de six heures, et reprise même
+périmée quand le catalogue ne répond pas (le fil le signale alors). Le catalogue reçoit une
+requête par carte et par six heures au lieu de deux par quart d'heure. Dans le même mouvement,
+`fetchCardDetail` distingue enfin une carte inconnue (404) d'un catalogue muet, et toutes les
+requêtes sortantes — TCGdex, Vinted, eBay, Bulbapedia — ont un délai maximal : un passage qui
+traînait était tué à trois minutes par le lanceur, sans rien écrire, ni instantané ni journal.
+
 Reste le cas qui n'est pas une trappe mais une confusion : le site découvre des annonces à chaque
 visite — elles portent la pastille « nouveau » — mais seule la veille alerte. Un serveur de
 développement sur un autre poste montre donc des nouveautés sans jamais rien envoyer, et ce n'est
@@ -1214,6 +1227,7 @@ lib/
   json-file.ts              lecture/écriture atomique, sérialisation par clé
   image-cache.ts            cache disque des visuels, préchauffage, purge
   tcgdex.ts                 cartes, extensions, images, cotes — bases française et japonaise
+  card-cache.ts             copie locale des fiches, pour une veille qui survit à un catalogue muet
   japanese.ts               noms japonais ↔ français, pour chercher et noter les cartes japonaises
   bulbapedia.ts             second catalogue japonais : pages d'espèce et de carte de Bulbapedia
   pokedex-names.ts          table des espèces (ja, fr, en), générée depuis PokéAPI
@@ -1236,7 +1250,7 @@ deploy/
   Caddyfile                 reverse proxy et HTTPS automatique
   pokebroc*.service/.timer  le site et ses trois minuteries
   tablette/
-    lancer.sh               les unités rejouées sans systemd — site, collecte, sauvegarde
+    lancer.sh               les unités rejouées sans systemd — site, collecte, mise à jour, sauvegarde
     boot.sh                 démarrage automatique via Termux:Boot
     LISEZMOI.md             dossier de bord du serveur tablette — chemins, pannes, remèdes
 tests/                      node:test — match, japanese, bulbapedia, tcgdex, ebay, rate-limit, sightings,

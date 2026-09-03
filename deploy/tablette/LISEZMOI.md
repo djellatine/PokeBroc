@@ -78,6 +78,23 @@ d'heure, sauvegarde vers 4 h du matin, un Xvfb pour Cardmarket, et un verrou
 - La connexion au compte en HTTP ne tient que grâce à `SESSION_HTTP=1` — déjà
   posé par le lanceur, rien à faire.
 
+### Accéder à la tablette depuis le PC (SSH)
+
+Monté le 3 septembre 2026, pour lire les journaux et dépanner sans toucher à
+la tablette. Un serveur SSH tourne **côté Termux** (pas dans le Debian), sur le
+port 8022, et n'accepte que la clé du PC — le mot de passe posé à
+l'installation ne sert plus.
+
+- Depuis le PC, Tailscale connecté au même compte :
+  `ssh -p 8022 -i ~/.ssh/id_ed25519_tablette u0_a165@100.80.154.77`
+  (l'adresse est celle de `tab-13` dans la console Tailscale).
+- On arrive dans Termux. Pour entrer dans le Debian où tout tourne :
+  `proot-distro login debian -- bash -c "…"`, comme partout dans ce dossier.
+- `sshd` est relancé par `boot.sh` au démarrage et par le bouton PokeBroc du
+  widget. S'il ne répond pas après un redémarrage : ouvrir Termux, taper `sshd`.
+- Côté tablette, ce qui a été fait une fois : `pkg install openssh`, `passwd`,
+  puis la clé publique du PC dans `~/.ssh/authorized_keys`.
+
 ### Le démarrage automatique, et pourquoi il ne marche pas
 
 `~/.termux/boot/pokebroc.sh` (copie de `deploy/tablette/boot.sh`) est en place,
@@ -91,20 +108,31 @@ redémarrage, l'automatique est revenu.
 
 ## Mettre à jour le site après des modifs
 
-Le circuit : les modifs se font sur le PC, sont poussées sur GitHub, et la
-tablette les tire. **Un pull ne suffit pas toujours** — le site sert ce que
-`npm run build` a construit, pas les sources. Deux cas :
+Depuis le 3 septembre 2026, **la tablette se met à jour toute seule**. Le
+circuit : les modifs se font sur le PC, sont poussées sur GitHub, et le lanceur
+tire `origin/main` à la fin de chaque quart d'heure, après la veille et
+leboncoin (`mettre_a_jour` dans `lancer.sh`). Ensuite, selon ce qui a changé :
 
-- **La modif touche le site** (`app/`, `lib/`, `components/`) : Ctrl+C dans la
-  session du superviseur, puis
-  `proot-distro login debian -- bash -c "cd /root/PokeBroc && git pull && npm run build"`
-  (15-30 min), puis **bouton PokeBroc**.
-- **La modif ne touche que `collect/` ou la doc** : un simple
-  `proot-distro login debian -- bash -c "cd /root/PokeBroc && git pull"`,
-  sans rien arrêter — les collecteurs repartent à neuf à chaque quart d'heure
-  et prendront la nouvelle version au passage suivant.
+- **le site** (`app/`, `lib/`, `components/`, `package.json`…) : construction
+  dans `.next-nouveau` pendant que l'ancien site continue de servir (15-30 min),
+  puis bascule par deux renommages et relance du site. S'il ne répond pas dans
+  les trois minutes, retour à la construction précédente — le journal le dit, et
+  le dépôt reste sur la nouvelle version, à corriger puis reconstruire à la main ;
+- **les collecteurs ou la doc** : rien à faire, relus au passage suivant ;
+- **`collect/requirements.txt`** : `pip install` dans le venv ;
+- **`package-lock.json`** : `npm ci`, long ;
+- **`lancer.sh` lui-même** : il se relance, site compris.
 
-En cas de doute : le premier cas marche toujours, il coûte juste le build.
+Tout est consigné dans `collecte-AAAA-MM-JJ.log` sous « ── … mise à jour », et la
+sortie de `next build` dans `build.log`. La mise à jour refuse de tirer
+par-dessus des modifications locales du dépôt (hors `package-lock.json`, que
+`npm` réécrit ici et qu'on remet d'équerre) : si une ligne « modifications
+locales » apparaît, aller voir.
+
+Pour forcer sans attendre le quart d'heure, ou si l'automatique a échoué :
+`proot-distro login debian -- bash -c "cd /root/PokeBroc && git pull && npm run build"`
+puis `pkill -f next-server` — la boucle du lanceur relance le site en cinq
+secondes.
 
 ## Diagnostiquer une panne
 

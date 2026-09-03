@@ -296,15 +296,47 @@ function rank<T extends CardBrief>(cards: T[], query: string): T[] {
   });
 }
 
+/**
+ * Délai maximal d'une requête au catalogue. Sans lui, une connexion qui reste
+ * muette bloque la veille jusqu'à ce que le lanceur la tue — et un passage tué
+ * n'écrit rien, ni instantané ni journal.
+ */
+const TCGDEX_TIMEOUT_MS = 15_000;
+
+/**
+ * Réponse HTTP hors 2xx, distinguée d'une panne réseau par son statut.
+ *
+ * Champ déclaré à part, et non en propriété de paramètre : les tests tournent
+ * sous le dépouillement de types de Node, qui ne réécrit pas cette syntaxe-là.
+ */
+class TcgdexHttpError extends Error {
+  readonly status: number;
+
+  constructor(status: number, path: string) {
+    super(`TCGdex ${status} sur ${path}`);
+    this.status = status;
+  }
+}
+
 async function tcgdex<T>(path: string, revalidate = 3600, lang: Lang = "fr"): Promise<T> {
   const res = await fetch(`${API}/${lang}${path}`, {
     headers: { Accept: "application/json" },
     next: { revalidate },
+    signal: AbortSignal.timeout(TCGDEX_TIMEOUT_MS),
   });
-  if (!res.ok) {
-    throw new Error(`TCGdex ${res.status} sur ${path}`);
-  }
+  if (!res.ok) throw new TcgdexHttpError(res.status, path);
   return (await res.json()) as T;
+}
+
+/** Message court d'une panne réseau : le code (`ECONNRESET`), ou à défaut le texte. */
+function describe(error: unknown): string {
+  if (error instanceof TcgdexHttpError) return `TCGdex a répondu ${error.status}`;
+  if (error instanceof Error) {
+    if (error.name === "TimeoutError") return `TCGdex muet après ${TCGDEX_TIMEOUT_MS / 1000} s`;
+    const cause = (error as { cause?: { code?: string; message?: string } }).cause;
+    return `TCGdex injoignable : ${cause?.code ?? cause?.message ?? error.message}`;
+  }
+  return "TCGdex injoignable.";
 }
 
 export interface CardListItem extends CardBrief {
@@ -510,16 +542,37 @@ async function searchJapanese(q: string, limit: number): Promise<CardListItem[]>
   return rank(cards, q).slice(0, limit);
 }
 
-/** Détail complet d'une carte (set, rareté, cote Cardmarket…). */
-export async function getCard(cardId: string): Promise<CardDetail | null> {
-  if (cardId.startsWith(JB_PREFIX)) return bulbaCard(cardId);
+/**
+ * Détail complet d'une carte (set, rareté, cote Cardmarket…), avec la raison
+ * quand il manque.
+ *
+ * Deux absences n'ont rien à voir : une carte que le catalogue ne connaît pas
+ * (404, `error` nul) et un catalogue qui ne répond pas (`error` renseigné).
+ * La veille les confondait sous « Carte introuvable dans la base TCGdex » et
+ * l'on a cherché la panne du mauvais côté pendant une journée. Pour une carte
+ * Bulbapedia, le wiki ne fait pas la différence non plus : l'erreur est posée
+ * dans le doute, et `lib/card-cache.ts` reprend alors la copie.
+ */
+export async function fetchCardDetail(
+  cardId: string,
+): Promise<{ card: CardDetail | null; error: string | null }> {
+  if (cardId.startsWith(JB_PREFIX)) {
+    const card = await bulbaCard(cardId);
+    return { card, error: card ? null : "Bulbapedia : page introuvable ou injoignable" };
+  }
   const { lang, id } = locate(cardId);
   try {
     const card = await tcgdex<CardDetail>(`/cards/${encodeURIComponent(id)}`, 3600, lang);
-    return lang === "ja" ? japaneseCard(card) : card;
-  } catch {
-    return null;
+    return { card: lang === "ja" ? await japaneseCard(card) : card, error: null };
+  } catch (error) {
+    if (error instanceof TcgdexHttpError && error.status === 404) return { card: null, error: null };
+    return { card: null, error: describe(error) };
   }
+}
+
+/** Détail complet d'une carte, ou `null` — sans dire pourquoi. Voir `fetchCardDetail`. */
+export async function getCard(cardId: string): Promise<CardDetail | null> {
+  return (await fetchCardDetail(cardId)).card;
 }
 
 /**

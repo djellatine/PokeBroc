@@ -16,6 +16,10 @@
 # quarts d'heure de collecte s'étirent en heures.
 termux-wake-lock
 
+# L'accès à distance (port 8022, clé seulement — voir LISEZMOI.md) : c'est par
+# lui que le PC lit les journaux et dépanne sans toucher à la tablette.
+sshd
+
 # Puis le lanceur, dans le Debian. Le verrou du lanceur rend la chose
 # idempotente : si un exemplaire tourne déjà, celui-ci se retire sans bruit.
 proot-distro login debian -- bash /root/PokeBroc/deploy/tablette/lancer.sh &

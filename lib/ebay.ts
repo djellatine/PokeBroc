@@ -129,6 +129,13 @@ function credentials(): { id: string; secret: string } {
   return { id, secret };
 }
 
+/**
+ * Délai maximal d'une requête. Sans lui, une connexion muette bloque la veille
+ * jusqu'à ce que le lanceur la tue à trois minutes — et un passage tué n'écrit
+ * ni instantané ni journal. Vingt secondes : Vinted répond d'ordinaire en une.
+ */
+const REQUEST_TIMEOUT_MS = 20_000;
+
 async function fetchToken(): Promise<string> {
   const { id, secret } = credentials();
 
@@ -140,6 +147,7 @@ async function fetchToken(): Promise<string> {
     },
     body: new URLSearchParams({ grant_type: "client_credentials", scope: SCOPE }),
     cache: "no-store",
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
 
   if (!res.ok) {
@@ -386,6 +394,7 @@ async function call(url: string, token: string, marketplace: string): Promise<Re
       "Accept-Language": "fr-FR",
     },
     cache: "no-store",
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
 }
 
