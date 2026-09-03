@@ -34,11 +34,14 @@ import type { FavoriteCard } from "@/lib/store";
  * bandeau n'est plus décoratif, il filtre.
  */
 
-type Sort = "deal" | "date" | "price" | "relevance";
+type Sort = "deal" | "date" | "oldest" | "price" | "relevance";
 
 const SORTS: { value: Sort; label: string }[] = [
   { value: "deal", label: "Meilleures affaires" },
   { value: "date", label: "Derniers ajouts" },
+  // L'inverse : les annonces qui traînent depuis des semaines, dont le
+  // vendeur a eu le temps de revoir ses prétentions — et d'accepter une offre.
+  { value: "oldest", label: "Plus anciennes" },
   { value: "price", label: "Prix croissant" },
   { value: "relevance", label: "Plus pertinentes" },
 ];
@@ -404,6 +407,8 @@ export default function Dashboard({
 
     const sorted = [...scoped].sort((a, b) => {
       if (filters.sort === "date") return (b.createdAt ?? 0) - (a.createdAt ?? 0);
+      // Sans date connue, en dernier : une annonce sans date n'est pas ancienne.
+      if (filters.sort === "oldest") return (a.createdAt ?? Infinity) - (b.createdAt ?? Infinity);
       if (filters.sort === "price") {
         return (a.totalPrice ?? a.price ?? Infinity) - (b.totalPrice ?? b.price ?? Infinity);
       }
