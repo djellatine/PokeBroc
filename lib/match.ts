@@ -40,6 +40,19 @@ export interface MatchSignals {
    * autre carte.
    */
   otherPrint: boolean;
+  /**
+   * Le titre annonce la langue de la carte — « japonaise », « jap », « JP ».
+   * Ne vaut que pour une carte japonaise : sur une française, le silence est
+   * la norme et ne dit rien.
+   */
+  language: boolean;
+  /**
+   * Le titre annonce une *autre* langue que celle de la carte : « Pikachu
+   * 001/SV-P chinois ». Les cartes chinoises portent la numérotation japonaise
+   * à l'identique, seul le titre les distingue. Même sort que `otherPrint` :
+   * visible, mais sans écart à la cote, et jamais forte.
+   */
+  otherLanguage: boolean;
   score: number;
 }
 
@@ -254,6 +267,74 @@ function hasAny(haystack: string, words: string[]): boolean {
   return words.some((word) => hasWord(haystack, word));
 }
 
+/* ------------------------------------------------------------- japonais */
+
+/**
+ * Ce que les vendeurs écrivent pour dire « japonaise ». Mesuré sur Vinted le
+ * 3 septembre 2026 : « Japonaise », « jap », « JP », « JPN », « Japon »,
+ * « japanese », et les voisins italien et allemand, présents dans le
+ * catalogue français.
+ */
+const JAPANESE_WORDS = [
+  "jap",
+  "japonais",
+  "japonaise",
+  "japonaises",
+  "japon",
+  "japanese",
+  "jp",
+  "jpn",
+  "giapponese",
+  "japanisch",
+  "japones",
+  "japonesa",
+];
+
+/**
+ * Autres langues qu'un titre peut déclarer pour une carte numérotée à la
+ * japonaise. Le chinois surtout : « Pikachu 001/SV-P Chinese » est la moitié
+ * de la première page pour cette carte, avec la même numérotation et un prix
+ * sans rapport.
+ */
+const OTHER_LANGUAGE_WORDS = [
+  "chinois",
+  "chinoise",
+  "chinese",
+  "cinese",
+  "chinesisch",
+  "chino",
+  "coreen",
+  "coreenne",
+  "korean",
+  "coreano",
+  "thai",
+  "thailandais",
+  "thailandaise",
+  "indonesien",
+  "indonesian",
+  "francaise",
+  "francais",
+  "anglaise",
+  "anglais",
+  "english",
+];
+
+/** Katakanas, hiraganas, kanjis : un nom que la table n'a pas su traduire. */
+const JAPANESE_SCRIPT = /[\p{scx=Hiragana}\p{scx=Katakana}\p{scx=Han}]/u;
+
+/**
+ * Graphies du code d'extension d'une carte japonaise dans un titre.
+ *
+ * « SV-P » s'écrit « 001/SV-P », « SV-P 001 », « 197|sv-p », ou collé « SVP ».
+ * `normalize` ayant déjà fait des tirets des espaces, le code y devient
+ * « sv p » ; on admet aussi la forme soudée.
+ */
+function setCodes(setId: string): string[] {
+  const spaced = normalize(setId);
+  const glued = spaced.replace(/\s+/g, "");
+  return spaced === glued ? [spaced] : [spaced, glued];
+}
+
 /** Le nom d'un set contient souvent des mots trop génériques pour servir de signal. */
 function setKeywords(setName: string): string[] {
   const stop = new Set([
@@ -283,11 +364,18 @@ export function scoreItem<T extends Scorable>(item: T, card: CardDetail): Scored
   // chercher « dracaufeu ☆ δ » dans « Dracaufeu Gold star 100/101 ».
   const cardName = normalize(searchName(card));
   const total = card.set?.cardCount?.official;
+  const japanese = card.lang === "ja";
 
-  const name = cardName.length > 2 && title.includes(cardName);
+  // Une carte japonaise se vend sous son nom français ou anglais, au choix du
+  // vendeur : « Évoli SV-P 198 » comme « Poncho Wearing Eevee ».
+  const names = [cardName, card.nameEn ? normalize(card.nameEn) : ""].filter(
+    (candidate) => candidate.length > 2,
+  );
+  const name = names.some((candidate) => title.includes(candidate));
 
   // "4/102", "4 / 102", "#4", ou le numéro isolé entre séparateurs.
   const local = card.localId?.replace(/[^a-z0-9]/gi, "");
+  const codes = japanese && card.set?.id ? setCodes(card.set.id) : [];
   let number = false;
   if (local) {
     const patterns = [
@@ -295,12 +383,26 @@ export function scoreItem<T extends Scorable>(item: T, card: CardDetail): Scored
       // traits d'union, et « 4-102 » doit continuer de valoir « 4/102 ».
       total ? new RegExp(`\\b${local}\\s*[/\\s-]\\s*${total}\\b`, "i") : null,
       new RegExp(`(?:^|[\\s(\\[#])n?[°o]?\\s*${local}(?:$|[\\s)\\]/,.-])`, "i"),
+      // Les promos japonaises n'ont pas de total : le code de l'extension le
+      // remplace, avant ou après le numéro — « 001/SV-P », « (SV-P 001) ».
+      ...codes.flatMap((code) => [
+        new RegExp(`\\b${local}\\s*[/|\\s]?\\s*${code}\\b`, "i"),
+        new RegExp(`\\b${code}\\s*[/|\\s]?\\s*${local}\\b`, "i"),
+      ]),
     ].filter(Boolean) as RegExp[];
     number = patterns.some((re) => re.test(title));
   }
 
-  const keywords = card.set?.name ? setKeywords(card.set.name) : [];
-  const set = keywords.length > 0 && keywords.some((word) => title.includes(word));
+  // Le nom d'une extension japonaise ne figure dans aucun titre français ;
+  // son code, si — « SV8a », « M-P ». Mot entier : « m p » est aussi la fin de
+  // « film pokemon ».
+  const keywords = japanese ? [] : card.set?.name ? setKeywords(card.set.name) : [];
+  const set = japanese
+    ? codes.length > 0 && hasAny(title, codes)
+    : keywords.length > 0 && keywords.some((word) => title.includes(word));
+
+  const language = japanese && hasAny(title, JAPANESE_WORDS);
+  const otherLanguage = japanese && hasAny(title, OTHER_LANGUAGE_WORDS);
 
   // La source prime sur le titre quand elle sait : `?? ` et non `||`, pour
   // qu'un `false` déclaré par eBay ne soit pas réécrit par un « psa » du titre.
@@ -343,6 +445,15 @@ export function scoreItem<T extends Scorable>(item: T, card: CardDetail): Scored
   if (name) score += 4;
   if (number) score += 4;
   if (set) score += 3;
+  // Deux points, pas quatre : « Pikachu japonaise » sans numéro reste une
+  // correspondance large, il y a cent Pikachu japonaises. Mais numéro et code
+  // d'extension avec la langue font une forte sans le nom (4 + 3 + 2) : c'est
+  // le cas des cartes Dresseur, que la table ne traduit pas, et « 121/SV-P »
+  // ne désigne de toute façon qu'une seule carte.
+  if (language) score += 2;
+  // Ramène « Pikachu 001/SV-P chinois » de 8 à 4 : visible en élargissant,
+  // jamais annoncée.
+  if (otherLanguage) score -= 4;
   if (bulk) score -= 2;
   if (item.promoted) score -= 1;
   // Assez lourd pour faire passer une reproduction sous le seuil strict, même
@@ -355,13 +466,25 @@ export function scoreItem<T extends Scorable>(item: T, card: CardDetail): Scored
   const trend = card.pricing?.cardmarket?.trend ?? card.pricing?.cardmarket?.avg30 ?? null;
   const price = item.totalPrice ?? item.price;
   const vsMarket =
-    trend && trend > 0 && price !== null && !otherPrint
+    trend && trend > 0 && price !== null && !otherPrint && !otherLanguage
       ? Math.round(((price - trend) / trend) * 100)
       : null;
 
   return {
     ...item,
-    match: { name, number, set, graded, bulk, fake, junk, otherPrint, score },
+    match: {
+      name,
+      number,
+      set,
+      graded,
+      bulk,
+      fake,
+      junk,
+      otherPrint,
+      language,
+      otherLanguage,
+      score,
+    },
     trend,
     vsMarket,
   };
@@ -538,6 +661,15 @@ export const CONDITION_LABELS: Record<NonNullable<Condition>, string> = {
 export function bestQuery(card: CardDetail): string {
   const name = searchName(card);
   const printed = cardNumber(card);
+  // Carte japonaise dont le nom n'a pas de traduction — une Dresseur, le plus
+  // souvent. Le nom japonais ne trouverait rien sur Vinted ; le numéro, avec
+  // son code d'extension, désigne la carte à lui seul.
+  if (card.lang === "ja" && JAPANESE_SCRIPT.test(name)) {
+    return `carte pokemon japonaise ${printed ?? card.localId ?? ""}`.trim();
+  }
+  // « Pikachu 001/SV-P » : 271 annonces, la première page entière sur la
+  // bonne carte (mesuré le 3 septembre 2026). Rien à ajouter, surtout pas
+  // « japonaise », que la moitié des vendeurs n'écrivent pas.
   if (printed?.includes("/")) return `${name} ${printed}`;
   if (card.localId) return `${name} ${card.localId}`;
   if (card.set?.name) return `${name} ${card.set.name}`;
@@ -554,12 +686,16 @@ export function bestQuery(card: CardDetail): string {
  * en partant du mot « lot » plutôt que de la carte.
  */
 export function lotQueries(card: CardDetail): string[] {
-  const queries = [`lot ${searchName(card)}`];
+  const name = searchName(card);
+  const japanese = card.lang === "ja";
+  const queries = japanese && JAPANESE_SCRIPT.test(name) ? [] : [`lot ${name}`];
 
   // L'extension ouvre sur les lots qui ne nomment aucune carte — « lot Base
   // Set », « lot Écarlate et Violet ». Ce sont les plus volumineux, et les
-  // seuls que la requête par nom ne peut pas atteindre.
-  if (card.set?.name) queries.push(`lot cartes ${card.set.name}`);
+  // seuls que la requête par nom ne peut pas atteindre. Le nom d'une extension
+  // japonaise n'apparaît jamais dans un titre : on cherche les lots japonais.
+  if (japanese) queries.push("lot cartes pokemon japonaises");
+  else if (card.set?.name) queries.push(`lot cartes ${card.set.name}`);
 
   const seen = new Set<string>();
   return queries.filter((query) => {
@@ -575,6 +711,23 @@ export function suggestedQueries(card: CardDetail): { label: string; query: stri
   const out: { label: string; query: string }[] = [];
   const printed = cardNumber(card);
   const name = searchName(card);
+
+  if (card.lang === "ja") {
+    // Le nom seul ne dit pas la langue : « Pikachu carte pokemon » ramène les
+    // françaises. Et l'extension se cherche par son code, jamais par son nom.
+    const named = !JAPANESE_SCRIPT.test(name);
+    if (named) out.push({ label: "Nom seul", query: `${name} carte pokemon japonaise` });
+    if (printed) {
+      out.push({
+        label: named ? `Nom + ${printed}` : `Carte ${printed}`,
+        query: named ? `${name} ${printed}` : `carte pokemon japonaise ${printed}`,
+      });
+    }
+    if (named && card.set?.id) {
+      out.push({ label: `Nom + ${card.set.id}`, query: `${name} ${card.set.id}` });
+    }
+    return out;
+  }
 
   out.push({ label: "Nom seul", query: `${name} carte pokemon` });
   if (card.localId) {

@@ -80,3 +80,55 @@ export function makeItem(
     ...overrides,
   };
 }
+
+/**
+ * Pikachu promo japonaise, `ja:SV-P-001` — la carte que TCGdex livre en
+ * japonais et que `getCard` a déjà traduite : nom français, nom anglais,
+ * code de l'extension devant son nom. Pas de total officiel : les promos
+ * s'impriment « 001/SV-P ».
+ */
+export const PIKACHU_JA: CardDetail = {
+  id: "ja:SV-P-001",
+  localId: "001",
+  name: "Pikachu",
+  nameJa: "ピカチュウ",
+  nameEn: "Pikachu",
+  lang: "ja",
+  rarity: "Promo",
+  set: {
+    id: "SV-P",
+    name: "SV-P · スカーレット&バイオレット プロモカード",
+    cardCount: { official: 0, total: 288 },
+  },
+  pricing: { cardmarket: { trend: 25 } },
+};
+
+/** Phyllali ex de Terastal Festival, `ja:SV8a-003` : une extension numérotée « 003/187 ». */
+export const PHYLLALI_JA: CardDetail = {
+  id: "ja:SV8a-003",
+  localId: "003",
+  name: "Phyllali ex",
+  nameJa: "リーフィアex",
+  nameEn: "Leafeon ex",
+  lang: "ja",
+  set: {
+    id: "SV8a",
+    name: "SV8a · テラスタルフェスex",
+    cardCount: { official: 187, total: 237 },
+  },
+  pricing: { cardmarket: { trend: 40 } },
+};
+
+/** Carte Dresseur japonaise, hors table des espèces : le nom reste en japonais. */
+export const NANJAMO_JA: CardDetail = {
+  id: "ja:SV-P-121",
+  localId: "121",
+  name: "ナンジャモ",
+  nameJa: "ナンジャモ",
+  lang: "ja",
+  set: {
+    id: "SV-P",
+    name: "SV-P · スカーレット&バイオレット プロモカード",
+    cardCount: { official: 0, total: 288 },
+  },
+};

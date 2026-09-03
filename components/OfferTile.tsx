@@ -2,7 +2,13 @@
 
 import Link from "next/link";
 import HideButton from "@/components/HideButton";
-import { deviationStyle, feesLabel, postedHint, SourceChip } from "@/components/OfferRow";
+import {
+  deviationStyle,
+  feesLabel,
+  JapaneseChip,
+  postedHint,
+  SourceChip,
+} from "@/components/OfferRow";
 import { CONDITION_LABELS } from "@/lib/match";
 import { age, countdown, euro, percent, plural } from "@/lib/format";
 import type { FeedCard, FeedItem } from "@/lib/feed";
@@ -117,6 +123,7 @@ export default function OfferTile({
           </Link>
 
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-faint">
+            <JapaneseChip cardId={card.cardId} />
             <SourceChip source={item.source} />
             {item.condition && <span>{CONDITION_LABELS[item.condition]}</span>}
             {item.trend !== null && (

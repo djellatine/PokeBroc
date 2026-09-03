@@ -266,6 +266,56 @@ espace : `Latias-ex` se cherche `Latias ex`, parce que ni `Latias-ex` ni `latias
 dans un titre d'annonce. La recherche libre de la fiche carte suit la même règle, `suggestedQueries`
 partageant `searchName`.
 
+### Les cartes japonaises
+
+Certaines cartes n'existent qu'au Japon — les promos McDonald's, les campagnes Pokémon Center, des
+extensions entières jamais traduites — et se vendent pourtant en France, sur les mêmes places de
+marché. TCGdex les connaît, dans une base séparée : 184 extensions, les visuels, et la cote
+Cardmarket, qui vend aussi du japonais. Ce qu'il n'a pas, c'est le nom français : la base japonaise
+ne parle que katakanas, sans numéro de Pokédex.
+
+Une carte japonaise porte donc un identifiant préfixé, `ja:SV-P-001`, qui suit la carte partout —
+favoris, instantanés, adresses de page — et dit à `getCard` quelle base lire. Le préfixe évite au
+passage une collision réelle : `SV8a` et `sv8a` ne diffèrent que par la casse, que Windows ignore
+dans les noms de fichiers. Le bouton **JP** de la barre de recherche bascule vers cette base, et se
+cherche avec le même nom français : `lib/japanese.ts` traduit la saisie en katakanas depuis la
+table des espèces (`pokedex-names.ts`, tirée de PokéAPI), puis retraduit les résultats. Les cartes
+Dresseur, hors table, gardent leur nom japonais et se cherchent en le tapant tel quel.
+
+La notation part de ce que les vendeurs écrivent, relevé le 3 septembre 2026 sur `Pikachu 001/SV-P` :
+
+| Titre | Ce qu'on en lit |
+| --- | --- |
+| `Pikachu Promo 001/SV-P` | nom + numéro, avec le **code de l'extension** en dénominateur |
+| `Pikachu Promo Japonais (SV-P 001)` | le même numéro, code devant, plus la langue |
+| `Pikachu McDo 020/M-P` | une promo McDonald's japonaise : `M-P` |
+| `Évoli / Eevee Reverse Pokéball SV8a 125/187` | numéro et total, comme une française, et le code |
+| `Pikachu 001/SV-P Chinese Sealed` | **une autre carte** : même numérotation, autre langue, autre prix |
+
+Sur la première page de cette requête, 31 annonces sur 48 sont fortes, et les 8 chinoises retombent
+à 6 ou 7 — visibles en élargissant, sans écart à la cote, jamais annoncées. D'où trois différences
+avec une carte française :
+
+- **Le numéro se lit avec le code de l'extension** quand la promo n'a pas de total — `001/SV-P`,
+  `SV-P 001`, `197|sv-p`, `SVP 001` — et le code compte comme signal d'extension, en mot entier
+  (`m p` est aussi la fin de `film pokemon`). Le nom de l'extension japonaise, lui, n'apparaît
+  dans aucun titre et n'est jamais cherché.
+- **La langue déclarée compte** : `japonaise`, `jap`, `JP`, `JPN` valent +2. Assez peu pour que
+  « Pikachu japonaise » reste une correspondance large — il y a cent Pikachu japonaises — mais
+  assez pour qu'un numéro avec son code et la langue fassent une forte sans le nom (4 + 3 + 2), ce
+  qui est le cas des cartes Dresseur. Une **autre** langue déclarée — `chinois`, `chinese`,
+  `coréen` — retire 4 points et efface l'écart à la cote : les chinoises portent la numérotation
+  japonaise à l'identique, seul le titre les distingue.
+- **Le nom anglais est admis** : `Leafeon ex 003/187` vaut `Phyllali ex 003/187`.
+
+Rien de tout cela ne touche une carte française : les signaux de langue n'existent que pour les
+japonaises, et « Dracaufeu 4/102 japonaise » garde son score de 8.
+
+Les alertes viennent sans rien ajouter : la veille note les annonces avec la même règle, et une
+Pikachu `001/SV-P` à −40 % arrive sur Discord avec un drapeau devant son nom. Ce qui reste hors
+champ : la surveillance Cardmarket, dont le collecteur résout ses pages depuis la base française et
+impose la langue française — le bouton **CM** n'est pas proposé sur une japonaise.
+
 ### Deux passes, systématiquement
 
 Vinted propose un tri par date, mais l'appliquer à une recherche floue revient à demander les
@@ -1091,7 +1141,9 @@ lib/
   rate-limit.ts             seau à jetons en mémoire
   json-file.ts              lecture/écriture atomique, sérialisation par clé
   image-cache.ts            cache disque des visuels, préchauffage, purge
-  tcgdex.ts                 cartes, extensions, images, cotes
+  tcgdex.ts                 cartes, extensions, images, cotes — bases française et japonaise
+  japanese.ts               noms japonais ↔ français, pour chercher et noter les cartes japonaises
+  pokedex-names.ts          table des espèces (ja, fr, en), générée depuis PokéAPI
   vinted.ts                 session, throttle, cache, normalisation
   lbc.ts                    lots et cartes leboncoin (aucune requête : voir collect/)
   match.ts                  notation des annonces, état, requêtes, vocabulaires éliminatoires
@@ -1114,7 +1166,8 @@ deploy/
     lancer.sh               les unités rejouées sans systemd — site, collecte, sauvegarde
     boot.sh                 démarrage automatique via Termux:Boot
     LISEZMOI.md             dossier de bord du serveur tablette — chemins, pannes, remèdes
-tests/                      node:test — match, ebay, rate-limit, sightings, format, alertes, store
+tests/                      node:test — match, japanese, tcgdex, ebay, rate-limit, sightings, format,
+                            alertes, store
                             collect/test_lbc.py — normalisation et rotation, sans réseau
 ```
 

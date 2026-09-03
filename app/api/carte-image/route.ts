@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
   // `cardId` sans `src` : la base française n'a pas d'illustration pour cette
   // carte, on laisse le serveur chercher un équivalent (voir `resolveCardImage`).
   let src = params.get("src") ?? "";
-  let lang: "fr" | "en" = "fr";
+  let lang: "fr" | "en" | "ja" = "fr";
   if (!src && cardId) {
     const resolved = await resolveCardImage(cardId);
     if (!resolved) {

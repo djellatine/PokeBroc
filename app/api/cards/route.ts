@@ -12,13 +12,15 @@ const WARM_COUNT = 18;
 
 export async function GET(request: NextRequest) {
   const query = request.nextUrl.searchParams.get("q")?.trim() ?? "";
+  // `lang=ja` : la base japonaise, depuis la même saisie française.
+  const lang = request.nextUrl.searchParams.get("lang") === "ja" ? "ja" : "fr";
 
   if (query.length < 2) {
     return Response.json({ cards: [], query });
   }
 
   try {
-    const cards = await searchCards(query);
+    const cards = await searchCards(query, undefined, lang);
 
     // Sans attendre : le CDN travaille pendant que l'utilisateur lit les noms,
     // au lieu de démarrer seulement quand le navigateur réclame les vignettes.

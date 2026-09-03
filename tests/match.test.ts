@@ -17,7 +17,16 @@ import {
   suggestedQueries,
 } from "../lib/match.ts";
 import type { CardDetail } from "../lib/tcgdex.ts";
-import { DRACAUFEU, DRACAUFEU_STAR, EOKO_DELTA, SANS_COTE, makeItem } from "./helpers.ts";
+import {
+  DRACAUFEU,
+  DRACAUFEU_STAR,
+  EOKO_DELTA,
+  NANJAMO_JA,
+  PHYLLALI_JA,
+  PIKACHU_JA,
+  SANS_COTE,
+  makeItem,
+} from "./helpers.ts";
 
 const score = (title: string, extra = {}) =>
   scoreItem(makeItem({ title, ...extra }), DRACAUFEU).match;
@@ -363,5 +372,127 @@ describe("condition", () => {
 
   it("classe « très bon » avant « bon », malgré le mot commun", () => {
     assert.equal(condition("tres bon etat"), "excellent");
+  });
+});
+
+/* -------------------------------------------------------------- japonais */
+
+describe("scoreItem — cartes japonaises", () => {
+  const ja = (title: string, card = PIKACHU_JA) => scoreItem(makeItem({ title }), card).match;
+
+  /**
+   * Relevé Vinted du 3 septembre 2026, requête « Pikachu 001/SV-P » : la
+   * première page entière porte le numéro avec le code de l'extension, sous
+   * toutes ces graphies.
+   */
+  it("lit le code de l'extension comme dénominateur d'une promo", () => {
+    for (const title of [
+      "Pikachu Promo 001/SV-P",
+      "Pikachu 001 sv-p jp promo bgs 10",
+      "Pikachu SV-P 001 Pokémon Karte – Japanisch – Promo",
+      "Pikachu Promo Japonais (SV-P 001)",
+      "Pikachu 001|sv-p",
+    ]) {
+      const match = ja(title);
+      assert.equal(match.number, true, `numéro non lu dans « ${title} »`);
+      assert.equal(match.name, true);
+      assert.ok(match.score >= STRONG_SCORE, `« ${title} » devrait être forte`);
+    }
+  });
+
+  it("compte le code de l'extension comme signal d'extension, en mot entier", () => {
+    assert.equal(ja("Pikachu 001/SV-P").set, true);
+    assert.equal(ja("Pikachu SVP 001").set, true);
+
+    // « film pokemon » finit par « m p » : pas l'extension M-P.
+    const mcdo: CardDetail = {
+      ...PIKACHU_JA,
+      id: "ja:M-P-020",
+      localId: "020",
+      set: { ...PIKACHU_JA.set!, id: "M-P" },
+    };
+    assert.equal(ja("Pikachu du film pokemon", mcdo).set, false);
+    assert.equal(ja("Pikachu McDo 020/M-P", mcdo).number, true);
+  });
+
+  it("lit une extension numérotée comme une carte française, total compris", () => {
+    const match = ja("Phyllali ex 003/187 SV8a Terastal Festival JPN", PHYLLALI_JA);
+    assert.equal(match.number, true);
+    assert.equal(match.set, true);
+    assert.ok(match.score >= STRONG_SCORE);
+  });
+
+  it("reconnaît le nom anglais, que certains vendeurs préfèrent", () => {
+    assert.equal(ja("Leafeon ex 003/187", PHYLLALI_JA).name, true);
+  });
+
+  it("ne cherche pas le nom de l'extension japonaise dans les titres", () => {
+    // « テラスタルフェス » n'apparaît dans aucun titre français, et ses mots
+    // ne doivent pas compter : sans le code, pas d'extension.
+    assert.equal(ja("Phyllali ex 003/187", PHYLLALI_JA).set, false);
+  });
+
+  it("ajoute deux points quand le titre dit la langue, sans faire une forte du nom seul", () => {
+    const match = ja("Pikachu japonaise");
+    assert.equal(match.language, true);
+    assert.equal(match.score, 4 + 2);
+    assert.ok(match.score < STRONG_SCORE);
+  });
+
+  it("fait une forte du numéro, du code et de la langue — sans nom, cas des Dresseurs", () => {
+    const match = ja("Carte Pokémon japonaise 121/SV-P", NANJAMO_JA);
+    assert.equal(match.name, false);
+    assert.equal(match.number, true);
+    assert.equal(match.set, true);
+    assert.equal(match.language, true);
+    assert.ok(match.score >= STRONG_SCORE);
+  });
+
+  it("ramène une chinoise à la même numérotation sous le seuil strict, sans écart", () => {
+    const scored = scoreItem(makeItem({ title: "Pikachu 001/SV-P Chinese Sealed" }), PIKACHU_JA);
+    assert.equal(scored.match.otherLanguage, true);
+    assert.equal(scored.match.number, true);
+    assert.ok(scored.match.score < STRONG_SCORE);
+    assert.ok(scored.match.score >= WIDE_SCORE, "reste visible en élargissant");
+    assert.equal(scored.vsMarket, null);
+  });
+
+  it("ne touche pas à la notation d'une carte française", () => {
+    // Les signaux de langue n'existent que pour les japonaises : sur une
+    // française, un titre qui dit « japonaise » ne change rien au score.
+    const match = score("Dracaufeu 4/102 japonaise");
+    assert.equal(match.language, false);
+    assert.equal(match.otherLanguage, false);
+    assert.equal(match.score, 8);
+  });
+});
+
+describe("bestQuery — cartes japonaises", () => {
+  it("compose « nom + numéro/code » pour une promo", () => {
+    assert.equal(bestQuery(PIKACHU_JA), "Pikachu 001/SV-P");
+  });
+
+  it("compose « nom + numéro/total » pour une extension", () => {
+    assert.equal(bestQuery(PHYLLALI_JA), "Phyllali ex 003/187");
+  });
+
+  it("cherche par le numéro seul une carte dont le nom n'a pas de traduction", () => {
+    assert.equal(bestQuery(NANJAMO_JA), "carte pokemon japonaise 121/SV-P");
+  });
+});
+
+describe("suggestedQueries — cartes japonaises", () => {
+  it("dit la langue dans la requête large, et l'extension par son code", () => {
+    const queries = suggestedQueries(PIKACHU_JA).map((entry) => entry.query);
+    assert.deepEqual(queries, [
+      "Pikachu carte pokemon japonaise",
+      "Pikachu 001/SV-P",
+      "Pikachu SV-P",
+    ]);
+  });
+
+  it("ne propose que le numéro pour une carte sans nom traduit", () => {
+    const queries = suggestedQueries(NANJAMO_JA).map((entry) => entry.query);
+    assert.deepEqual(queries, ["carte pokemon japonaise 121/SV-P"]);
   });
 });

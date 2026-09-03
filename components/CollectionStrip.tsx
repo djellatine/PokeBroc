@@ -4,8 +4,10 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { dropFavorite, toggleCardmarketWatch } from "@/app/actions/favorites";
 import CardThumb from "@/components/CardThumb";
+import { JapaneseChip } from "@/components/OfferRow";
 import { plural } from "@/lib/format";
 import type { FavoriteCard } from "@/lib/store";
+import { isJapaneseId } from "@/lib/tcgdex";
 
 /**
  * Bandeau de la collection.
@@ -224,6 +226,7 @@ export default function CollectionStrip({
                     {favorite.localId && (
                       <span className="shrink-0 text-[10px] text-faint">n°{favorite.localId}</span>
                     )}
+                    <JapaneseChip cardId={favorite.cardId} />
                   </span>
 
                   <span
@@ -260,7 +263,10 @@ export default function CollectionStrip({
               {/* Surveiller aussi cette carte sur Cardmarket. Ouvre un menu pour
                   cocher reverse / 1ère édition. Toujours visible quand c'est
                   actif — un état à retrouver d'un coup d'œil — et révélé au
-                  survol sinon, comme la croix. */}
+                  survol sinon, comme la croix. Pas pour une carte japonaise :
+                  le collecteur Cardmarket résout ses pages depuis la base
+                  française, et impose la langue française à ses recherches. */}
+              {!isJapaneseId(favorite.cardId) && (
               <button
                 type="button"
                 onClick={(event) => openMenu(favorite.cardId, event)}
@@ -277,6 +283,7 @@ export default function CollectionStrip({
               >
                 CM
               </button>
+              )}
             </li>
           );
         })}

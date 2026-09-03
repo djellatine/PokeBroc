@@ -5,6 +5,7 @@ import HideButton from "@/components/HideButton";
 import { CONDITION_LABELS } from "@/lib/match";
 import { age, countdown, euro, percent, plural } from "@/lib/format";
 import type { FeedCard, FeedItem } from "@/lib/feed";
+import { isJapaneseId } from "@/lib/tcgdex";
 // Depuis `lib/source` et non `lib/feed` : c'est une valeur, donc un import qui
 // survit à la compilation et entraîne tout le module dans le paquet client.
 import { SOURCE_NAMES, type Source } from "@/lib/source";
@@ -26,6 +27,20 @@ import { SOURCE_NAMES, type Source } from "@/lib/source";
  * Exporté : la vignette pose le même écart sur la photo, et deux échelles de
  * couleur pour une même donnée se désynchroniseraient à la première retouche.
  */
+/**
+ * Pastille « JP » d'une carte japonaise. Le fil mêle les deux versions d'un
+ * même Pokémon, et « Pikachu n°001 » ne dit pas laquelle : la pastille, si.
+ * Rend `null` pour une française — la majorité — pour ne rien ajouter là.
+ */
+export function JapaneseChip({ cardId }: { cardId: string }) {
+  if (!isJapaneseId(cardId)) return null;
+  return (
+    <span className="chip border-rose-400/40 text-rose-300" title="Carte japonaise">
+      JP
+    </span>
+  );
+}
+
 export function deviationStyle(vsMarket: number): string {
   if (vsMarket <= -15) return "border-good/40 bg-good/15 text-good";
   if (vsMarket >= 20) return "border-bad/30 bg-bad/10 text-bad";
@@ -142,6 +157,7 @@ export default function OfferRow({
               {card.name}
               {card.localId && <span className="font-normal opacity-70"> n°{card.localId}</span>}
             </Link>
+            <JapaneseChip cardId={card.cardId} />
 
             {isNew && (
               <span className="rounded bg-new/20 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-new">

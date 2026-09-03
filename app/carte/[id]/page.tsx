@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import CardThumb from "@/components/CardThumb";
 import FavoriteButton from "@/components/FavoriteButton";
+import { JapaneseChip } from "@/components/OfferRow";
 import PriceHistory from "@/components/PriceHistory";
 import VintedResults from "@/components/VintedResults";
 import { getCurrentUser } from "@/lib/auth";
@@ -87,8 +88,13 @@ export default async function CardPage({ params }: Params) {
           </div>
 
           <div className="panel p-3.5">
-            <h1 className="text-lg font-bold leading-tight">{card.name}</h1>
+            <h1 className="flex items-center gap-2 text-lg font-bold leading-tight">
+              {card.name}
+              <JapaneseChip cardId={card.id} />
+            </h1>
             <dl className="mt-2.5">
+              <Info label="Nom japonais" value={card.nameJa} />
+              <Info label="Nom anglais" value={card.nameEn} />
               <Info label="Extension" value={card.set?.name} />
               <Info label="Numéro" value={cardNumber(card)} />
               <Info label="Rareté" value={card.rarity} />

@@ -37,6 +37,12 @@ export default function CardSearch({
 }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
+  /**
+   * Base interrogée. La japonaise sert aux cartes qui n'existent que là-bas —
+   * promos McDonald's, campagnes Pokémon Center — et se cherche avec le même
+   * nom français : la traduction est faite côté serveur.
+   */
+  const [lang, setLang] = useState<"fr" | "ja">("fr");
   const [cards, setCards] = useState<CardListItem[]>([]);
   const [status, setStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
@@ -73,7 +79,7 @@ export default function CardSearch({
     );
   }
 
-  const run = useCallback(async (raw: string) => {
+  const run = useCallback(async (raw: string, base: "fr" | "ja") => {
     const q = raw.trim();
     abortRef.current?.abort();
     setShowAll(false);
@@ -92,7 +98,8 @@ export default function CardSearch({
     setError(null);
 
     try {
-      const res = await fetch(`/api/cards?q=${encodeURIComponent(q)}`, {
+      const suffix = base === "ja" ? "&lang=ja" : "";
+      const res = await fetch(`/api/cards?q=${encodeURIComponent(q)}${suffix}`, {
         signal: controller.signal,
       });
       const data = (await res.json()) as { cards?: CardListItem[]; error?: string };
@@ -110,9 +117,9 @@ export default function CardSearch({
 
   // Recherche différée pendant la frappe.
   useEffect(() => {
-    const timer = setTimeout(() => void run(query), 250);
+    const timer = setTimeout(() => void run(query, lang), 250);
     return () => clearTimeout(timer);
-  }, [query, run]);
+  }, [query, lang, run]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
@@ -232,14 +239,37 @@ export default function CardSearch({
           aria-autocomplete="list"
           aria-activedescendant={active >= 0 ? `carte-option-${active}` : undefined}
           autoComplete="off"
-          className="h-9 w-full rounded-lg border border-line bg-panel-2 pl-9 pr-9 text-sm outline-none transition placeholder:text-faint focus:border-line-strong"
+          className="h-9 w-full rounded-lg border border-line bg-panel-2 pl-9 pr-[4.6rem] text-sm outline-none transition placeholder:text-faint focus:border-line-strong"
         />
         {status === "loading" && (
           <span
-            className="absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin rounded-full border-2 border-line border-t-accent"
+            className="absolute right-[3.4rem] top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin rounded-full border-2 border-line border-t-accent"
             aria-hidden
           />
         )}
+        {/* Bascule vers la base japonaise. Dans le champ plutôt qu'à côté :
+            c'est un réglage de la recherche, et il doit rester visible quand
+            l'aperçu est fermé, pour qu'on sache dans quelle base on tape. */}
+        <button
+          type="button"
+          onClick={() => {
+            setLang((current) => (current === "ja" ? "fr" : "ja"));
+            setOpen(true);
+          }}
+          aria-pressed={lang === "ja"}
+          title={
+            lang === "ja"
+              ? "Recherche dans les cartes japonaises — cliquez pour revenir aux françaises"
+              : "Chercher parmi les cartes japonaises (promos McDo, Pokémon Center…)"
+          }
+          className={`absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md border px-1.5 py-0.5 text-[10px] font-bold leading-4 transition ${
+            lang === "ja"
+              ? "border-rose-400/60 bg-rose-400/15 text-rose-300"
+              : "border-line text-faint hover:border-line-strong hover:text-dim"
+          }`}
+        >
+          🇯🇵 JP
+        </button>
       </div>
 
       {showPanel && (
@@ -271,9 +301,11 @@ export default function CardSearch({
 
           {status === "done" && cards.length === 0 && !error && (
             <p className="px-3 py-8 text-center text-sm text-dim">
-              Aucune carte ne correspond à « {trimmed} ».
+              Aucune carte {lang === "ja" ? "japonaise " : ""}ne correspond à « {trimmed} ».
               <span className="mt-1 block text-xs text-faint">
-                Vérifiez l’orthographe française du Pokémon.
+                {lang === "ja"
+                  ? "Tapez le nom français ou anglais du Pokémon — ou, pour une carte Dresseur, son nom en japonais."
+                  : "Vérifiez l’orthographe française du Pokémon."}
               </span>
             </p>
           )}
@@ -328,8 +360,14 @@ export default function CardSearch({
                     </div>
 
                     <div className="px-1.5 py-1.5">
-                      <p className="truncate text-[11px] font-semibold" title={card.name}>
+                      <p
+                        className="truncate text-[11px] font-semibold"
+                        title={card.nameJa ? `${card.name} · ${card.nameJa}` : card.name}
+                      >
                         {card.name}
+                        {card.lang === "ja" && (
+                          <span className="ml-1 font-normal text-rose-300">JP</span>
+                        )}
                       </p>
                       <p className="truncate text-[10px] text-faint" title={card.setName ?? ""}>
                         {card.setName ?? card.setId ?? "Extension inconnue"}
