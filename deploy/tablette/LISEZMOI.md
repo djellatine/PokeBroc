@@ -60,8 +60,20 @@ d'heure, sauvegarde vers 4 h du matin, un Xvfb pour Cardmarket, et un verrou
   Termux a le bouton CTRL).
 - **Après un redémarrage de la tablette, rien ne repart tout seul** : voir
   ci-dessous. **Un appui sur le bouton PokeBroc suffit** — c'est le seul geste
-  à retenir. Le verrou rend un double appui inoffensif, le site met une à deux
-  minutes à répondre, et Tailscale se reconnecte de lui-même.
+  à retenir. Il relance `sshd` (l'accès du PC), le site, la veille et les
+  collecteurs. Le verrou rend un double appui inoffensif, le site met une à
+  deux minutes à répondre, et Tailscale se reconnecte de lui-même — vérifier
+  quand même que son appli est connectée, c'est par elle que le PC arrive.
+
+### Les gestes du quotidien, en trois lignes
+
+- **Rien à faire** tant que la tablette est allumée : site, collecte, alertes
+  Discord et mises à jour tournent seuls ; le PC a accès par SSH jour et nuit.
+- **Après un redémarrage** : Tailscale connecté, puis bouton PokeBroc.
+- **Une modif** : elle se fait sur le PC, est poussée sur `main`, la tablette
+  la prend dans le quart d'heure. Ce qui est *épinglé* sur un serveur local
+  du PC reste sur le PC : épingler sur le site de la tablette
+  (`http://100.80.154.77:3000` par Tailscale, ou l'IP de la box à la maison).
 
 ### Accéder au site
 

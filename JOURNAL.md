@@ -118,6 +118,14 @@ tablette se met à jour toute seule dès qu'on pousse sur `main`.
   automatique invisible suivant (23:01), **5 cartes, 100 offres, aucun défi** en
   115 s. Le bandeau « IP surchauffée » est tombé avec lui.
 
+### Ce qu'il reste à faire au quotidien : rien
+
+Tant que la tablette est allumée, tout tourne seul et le PC y a accès par SSH.
+Après un redémarrage : Tailscale connecté, puis bouton PokeBroc (il relance
+aussi `sshd`). Les cartes s'épinglent sur le site de la tablette, pas sur un
+serveur local du PC — trois cartes japonaises épinglées sur le PC ce soir ont
+été recopiées à la main dans le compte de la tablette.
+
 ### Reste à faire, ou à surveiller
 
 - **Collecteur Cardmarket sur la tablette** : amorcé le 3 septembre au soir ;
