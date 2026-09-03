@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { withFrenchQuote } from "@/lib/cardmarket";
 import { getCard } from "@/lib/tcgdex";
 import { bestQuery, scoreAll } from "@/lib/match";
 import { searchVinted, type VintedOrder } from "@/lib/vinted";
@@ -34,7 +35,9 @@ export async function GET(request: NextRequest) {
   try {
     // `cardId` sans `q` : le fil d'accueil laisse le serveur choisir la requête la
     // plus ciblée, qui dépend de données (numéro imprimé) qu'il est seul à avoir.
-    const card = cardId ? await getCard(cardId) : null;
+    const found = cardId ? await getCard(cardId) : null;
+    // Même cote que le fil : la française quand le collecteur Cardmarket l'a.
+    const card = found ? (await withFrenchQuote(found)).card : null;
     const query = requested || (card ? bestQuery(card) : "");
 
     if (!query) {

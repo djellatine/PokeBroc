@@ -19,6 +19,7 @@
 import path from "node:path";
 import { isConfigured as hasEbay, searchEbay, type EbayItem } from "./ebay";
 import { DATA_DIR, readJson, safeFileName, serialize, writeJson } from "./json-file";
+import { withFrenchQuote } from "./cardmarket";
 import { readLbcForCard, refreshLbcLive, type LbcItem } from "./lbc";
 import {
   bestQuery,
@@ -57,6 +58,12 @@ export interface FeedCard {
   image: string | null;
   /** Cote Cardmarket de référence, en euros. */
   trend: number | null;
+  /**
+   * `"fr"` quand `trend` est la cote française relevée sur Cardmarket — offres
+   * en français, état EX ou mieux — et non la tendance TCGdex, toutes langues
+   * confondues. Le fil le dit à côté du chiffre.
+   */
+  trendBasis?: "fr";
 }
 
 /**
@@ -355,7 +362,12 @@ export async function refreshCard(
     // le catalogue ne répond pas : voir `lib/card-cache.ts` — c'est ce qui a
     // rendu la veille aveugle une journée entière.
     const loaded = await loadCard(favorite.cardId, now);
-    const card = loaded.card;
+    // Cote française à la place de la tendance TCGdex, quand le collecteur
+    // Cardmarket a relevé les offres de cette carte — voir `withFrenchQuote`.
+    const quoted = loaded.card
+      ? await withFrenchQuote(loaded.card, favorite.cardmarketPrefs ?? {}, now)
+      : { card: null, frenchQuote: null };
+    const card = quoted.card;
     if (!card) {
       const failed: Snapshot = {
         card: fallbackCard(favorite),
@@ -378,6 +390,7 @@ export async function refreshCard(
       setName: card.set?.name ?? favorite.setName ?? null,
       image: card.image ?? favorite.image ?? null,
       trend: card.pricing?.cardmarket?.trend ?? card.pricing?.cardmarket?.avg30 ?? null,
+      ...(quoted.frenchQuote !== null ? { trendBasis: "fr" as const } : {}),
     };
 
     const query = bestQuery(card);

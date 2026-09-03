@@ -64,9 +64,13 @@ export interface CardMarketPricing {
   avg1?: number | null;
   avg7?: number | null;
   avg30?: number | null;
+  /** Le tirage reverse, coté à part par Cardmarket. */
   "avg-holo"?: number | null;
   "low-holo"?: number | null;
   "trend-holo"?: number | null;
+  "avg1-holo"?: number | null;
+  "avg7-holo"?: number | null;
+  "avg30-holo"?: number | null;
   /** Identifiant produit Cardmarket, qui sert aussi à retrouver son image. */
   idProduct?: number;
 }

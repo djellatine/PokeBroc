@@ -28,6 +28,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { DATA_DIR, readJson, writeJson } from "./json-file";
 import type { FavoriteCard } from "./store";
+import type { CardDetail } from "./tcgdex";
 
 /** Doit rester identique aux chemins qu'écrit `collect/cardmarket.py`. */
 const CARDS_FILE = path.join(DATA_DIR, "cardmarket", "cartes.json");
@@ -97,6 +98,77 @@ export async function readCardmarketCards(): Promise<CardmarketSnapshot | null> 
   const snapshot = await readJson<CardmarketSnapshot>(CARDS_FILE);
   if (!snapshot?.cards || typeof snapshot.cards !== "object") return null;
   return snapshot;
+}
+
+/* ------------------------------------------------------------ cote FR */
+
+/**
+ * États Cardmarket qu'un acheteur accepte sans se poser de question : Mint,
+ * Near Mint, Excellent. Le reste — Good, Light Played, Played, Poor — se
+ * négocie à part, et ne dit rien du prix d'une belle carte.
+ */
+const QUOTE_CONDITIONS = new Set(["MT", "NM", "EX"]);
+
+/** Offres retenues pour la cote : les moins chères, pour lisser une seule aberration. */
+const QUOTE_SAMPLE = 3;
+
+/**
+ * Au-delà, un relevé Cardmarket ne fait plus une cote. Sept jours : les offres
+ * d'une carte chère bougent peu, et le collecteur, piloté par navigateur et
+ * régulièrement bloqué par Cloudflare, peut manquer plusieurs passages.
+ */
+export const QUOTE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Cote française d'une carte, d'après les offres relevées sur Cardmarket.
+ *
+ * La tendance que publie TCGdex mélange toutes les langues et tous les états,
+ * anglais surtout ; un collectionneur qui achète en français lit, lui, le
+ * « à partir de » de Cardmarket filtré sur sa langue et sur un bel état. C'est
+ * ce chiffre-là qu'on approche : la médiane des trois offres les moins chères
+ * en état EX ou mieux, parmi celles que le collecteur a relevées — en
+ * français, puisqu'il l'impose. `null` faute de trois offres : une seule peut
+ * être une erreur de saisie, et une cote fausse vaut moins qu'aucune.
+ */
+export function frenchQuote(offers: CardmarketOffer[]): number | null {
+  const prices = offers
+    .filter((offer) => offer.price !== null && offer.price > 0)
+    .filter((offer) => offer.condition && QUOTE_CONDITIONS.has(offer.condition.toUpperCase()))
+    .map((offer) => offer.price as number)
+    .sort((a, b) => a - b)
+    .slice(0, QUOTE_SAMPLE);
+  if (prices.length < QUOTE_SAMPLE) return null;
+  return Math.round(prices[Math.floor(prices.length / 2)] * 100) / 100;
+}
+
+/**
+ * La carte, avec sa cote française à la place de la tendance TCGdex quand le
+ * collecteur en a une — donc pour les cartes cochées « CM », et elles seules.
+ *
+ * Remplacée dans `pricing.cardmarket` plutôt que passée à côté : la notation
+ * lit la cote là, et rien d'autre n'a à savoir d'où elle vient. Si la carte est
+ * surveillée en reverse, ce sont ses offres reverse qui ont été relevées, et
+ * c'est la cote reverse qu'on remplace.
+ */
+export async function withFrenchQuote<T extends { id: string; pricing?: CardDetail["pricing"] }>(
+  card: T,
+  prefs: { reverse?: boolean } = {},
+  now = Date.now(),
+): Promise<{ card: T; frenchQuote: number | null }> {
+  const snapshot = await readCardmarketCards();
+  const found = snapshot?.cards[card.id];
+  if (!found || now - found.at > QUOTE_MAX_AGE_MS) return { card, frenchQuote: null };
+
+  const quote = frenchQuote(found.items);
+  if (quote === null) return { card, frenchQuote: null };
+
+  const market = { ...(card.pricing?.cardmarket ?? {}) };
+  if (prefs.reverse) market["trend-holo"] = quote;
+  else market.trend = quote;
+  return {
+    card: { ...card, pricing: { ...(card.pricing ?? {}), cardmarket: market } },
+    frenchQuote: quote,
+  };
 }
 
 /**

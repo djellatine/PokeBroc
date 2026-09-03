@@ -103,6 +103,34 @@ fait passer la moitié des annonces légitimes pour une autre impression.
 Effet mesuré sur les 871 annonces alors visibles : 23 écartées, 13 privées de leur écart, et un haut
 de classement qui ne contient plus que de vraies cartes.
 
+### La cote, et ce qu'elle n'est pas
+
+L'écart affiché sous chaque annonce — « −38 % », « +54 % » — compare son prix total, frais compris,
+à **une** référence : la tendance Cardmarket de la carte, telle que TCGdex la publie. C'est un prix
+lissé des ventes récentes du produit, **toutes langues et tous états confondus**, dominé par
+l'anglais. Ce n'est pas le « à partir de » qu'on lit sur Cardmarket en filtrant français et
+excellent, souvent bien plus haut pour une carte française recherchée : une annonce à 260 € face à
+un tel filtre à 230 € fait +13 %, face à une tendance globale à 169 € elle fait +54 %. Le chiffre
+n'est pas faux, il ne répond pas à la même question.
+
+L'état affiché — « Très bon », « Bon » — est la déclaration du vendeur sur Vinted, ramenée à quatre
+niveaux, jamais une estimation : rien dans une annonce ne permet d'en juger, et l'état n'entre pas
+dans l'écart. eBay n'en donne pas de fiable, on n'en affiche aucun.
+
+Deux corrections rapprochent l'écart de ce qu'un acheteur français attend :
+
+- **Le tirage.** Cardmarket cote la reverse à part — les champs `-holo` de TCGdex. Un titre qui dit
+  « reverse » se compare à cette cote-là ; « holo » aussi, mais seulement sur une carte dont le
+  tirage normal ne brille pas — sur une Rare Holo, « holo » décrit la version standard. Le cas qui a
+  tranché, le 3 septembre 2026 : une « Kyogre Holo 15/106 » à 300 € affichait **+23 999 %**, face
+  à la cote de la normale, 1,31 €, quand la reverse vaut 52 €.
+- **La cote française.** Pour les cartes cochées « CM », le collecteur relève les offres Cardmarket
+  en français, avec leur état. `frenchQuote` en tire la médiane des trois moins chères en état EX
+  ou mieux — trois, pour qu'une erreur de saisie ne fasse pas la cote — et `withFrenchQuote` la
+  substitue à la tendance TCGdex avant la notation, dans le fil comme sur la fiche. Le fil l'affiche
+  « cote FR », avec l'infobulle qui dit d'où elle vient. Un relevé de plus de sept jours ne compte
+  plus. C'est la seule cote par langue et par état dont on dispose, et elle reste limitée aux cartes
+  que le collecteur sonde.
 ### Les lots ont leur propre recherche, et leur notation inverse
 
 Le `−2` ci-dessus est ce qu'il faut pour un fil de cartes à l'unité, et exactement ce qu'il ne faut
@@ -1255,8 +1283,8 @@ deploy/
     boot.sh                 démarrage automatique via Termux:Boot
     LISEZMOI.md             dossier de bord du serveur tablette — chemins, pannes, remèdes
     ecran.py                voir et cliquer sur l'écran virtuel de la tablette, par VNC (défi Cloudflare)
-tests/                      node:test — match, japanese, bulbapedia, tcgdex, ebay, rate-limit, sightings,
-                            format, alertes, store
+tests/                      node:test — match, japanese, bulbapedia, tcgdex, cardmarket, ebay, rate-limit,
+                            sightings, format, alertes, store
                             collect/test_lbc.py — normalisation et rotation, sans réseau
 ```
 

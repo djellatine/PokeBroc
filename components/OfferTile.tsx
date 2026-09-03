@@ -8,6 +8,8 @@ import {
   JapaneseChip,
   postedHint,
   SourceChip,
+  trendHint,
+  trendLabel,
 } from "@/components/OfferRow";
 import { CONDITION_LABELS } from "@/lib/match";
 import { age, countdown, euro, percent, plural } from "@/lib/format";
@@ -127,8 +129,8 @@ export default function OfferTile({
             <SourceChip source={item.source} />
             {item.condition && <span>{CONDITION_LABELS[item.condition]}</span>}
             {item.trend !== null && (
-              <span title="Tendance Cardmarket pour la version standard">
-                cote {euro(item.trend)}
+              <span title={trendHint(card)}>
+                {trendLabel(card)} {euro(item.trend)}
               </span>
             )}
             {posted && <span title={postedHint(item.source)}>{posted}</span>}

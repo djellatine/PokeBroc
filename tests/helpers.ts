@@ -160,3 +160,18 @@ export const SALAMECHE_1996_JA: CardDetail = {
   lang: "ja",
   set: { id: "expansion-pack", name: "Expansion Pack", cardCount: { official: 0, total: 0 } },
 };
+
+/**
+ * Kyogre 15/106 d'EX Émeraude, `ex9-15` : une Rare dont le tirage normal ne
+ * brille pas, et dont la reverse vaut quarante fois plus. Chiffres TCGdex du
+ * 3 septembre 2026.
+ */
+export const KYOGRE_REVERSE: CardDetail = {
+  id: "ex9-15",
+  localId: "15",
+  name: "Kyogre",
+  rarity: "Rare",
+  set: { id: "ex9", name: "EX Émeraude", cardCount: { official: 106, total: 107 } },
+  variants: { firstEdition: false, holo: false, normal: true, reverse: true },
+  pricing: { cardmarket: { trend: 1.31, avg30: 3.23, "trend-holo": 51.9, "avg30-holo": 50.21 } },
+};

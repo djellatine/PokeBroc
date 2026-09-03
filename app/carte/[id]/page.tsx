@@ -7,6 +7,7 @@ import { JapaneseChip } from "@/components/OfferRow";
 import PriceHistory from "@/components/PriceHistory";
 import VintedResults from "@/components/VintedResults";
 import { getCurrentUser } from "@/lib/auth";
+import { withFrenchQuote } from "@/lib/cardmarket";
 import { euro } from "@/lib/format";
 import { suggestedQueries } from "@/lib/match";
 import { priceStats } from "@/lib/sightings";
@@ -45,13 +46,16 @@ export default async function CardPage({ params }: Params) {
   const { id } = await params;
   const cardId = decodeURIComponent(id);
 
-  const [card, user] = await Promise.all([getCard(cardId), getCurrentUser()]);
-  if (!card) notFound();
+  const [found, user] = await Promise.all([getCard(cardId), getCurrentUser()]);
+  if (!found) notFound();
 
+  // La cote française prime, comme dans le fil, quand le collecteur l'a.
+  const quoted = await withFrenchQuote(found);
+  const card = quoted.card;
   const stats = await priceStats(card.id);
   const saved = Boolean(user?.favorites.some((favorite) => favorite.cardId === card.id));
-  const market = card.pricing?.cardmarket ?? null;
-  const trend = market?.trend ?? market?.avg30 ?? null;
+  const market = found.pricing?.cardmarket ?? null;
+  const trend = quoted.frenchQuote ?? market?.trend ?? market?.avg30 ?? null;
 
   return (
     <div className="flex flex-col gap-5">
@@ -108,13 +112,18 @@ export default async function CardPage({ params }: Params) {
             <div className="panel p-3.5">
               <h2 className="eyebrow">Cote Cardmarket</h2>
               <dl className="mt-2">
+                <Info label="Cote FR (offres relevées)" value={euro(quoted.frenchQuote)} />
                 <Info label="Tendance" value={euro(market.trend)} />
+                <Info label="Tendance reverse" value={euro(market["trend-holo"])} />
                 <Info label="Moyenne 30 j" value={euro(market.avg30)} />
                 <Info label="Plus bas" value={euro(market.low)} />
               </dl>
               <p className="mt-2 text-[10px] leading-relaxed text-faint">
-                Référence pour la version standard. Une carte gradée ou 1st edition affichera
-                normalement un écart très positif.
+                La tendance mélange toutes les langues et tous les états, anglais surtout. La
+                cote FR, quand elle est là, est la médiane des trois offres Cardmarket les
+                moins chères en français, en état EX ou mieux — c&apos;est elle que le fil
+                retient. Une carte gradée ou 1st edition affichera normalement un écart très
+                positif.
               </p>
             </div>
           )}

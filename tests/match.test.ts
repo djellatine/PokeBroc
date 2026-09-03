@@ -22,6 +22,7 @@ import {
   DRACAUFEU,
   DRACAUFEU_STAR,
   EOKO_DELTA,
+  KYOGRE_REVERSE,
   NANJAMO_JA,
   PHYLLALI_JA,
   PIKACHU_JA,
@@ -601,5 +602,36 @@ describe("scoreItem — le numéro nu ne suffit pas à une japonaise", () => {
 
   it("laisse le numéro nu aux françaises, comme avant", () => {
     assert.equal(score("Dracaufeu n°4 Set de Base").number, true);
+  });
+});
+
+describe("scoreItem — cote du bon tirage", () => {
+  const cote = (title: string, card = KYOGRE_REVERSE) => scoreItem(makeItem({ title }), card);
+
+  it("compare une reverse annoncée à la cote reverse", () => {
+    const scored = cote("Kyogre 15/106 reverse EX Émeraude");
+    assert.equal(scored.match.reverse, true);
+    assert.equal(scored.trend, 51.9);
+  });
+
+  it("lit « holo » comme reverse quand le tirage normal ne brille pas", () => {
+    // Le cas qui affichait +23 999 % : 300 € face à 1,31 €.
+    const scored = cote("Kyogre Holo 15/106 EX Émeraude 2005 Pokémon Rare FR");
+    assert.equal(scored.match.reverse, true);
+    assert.equal(scored.trend, 51.9);
+  });
+
+  it("garde la cote normale sans mention de tirage", () => {
+    const scored = cote("Kyogre 15/106 EX Émeraude");
+    assert.equal(scored.match.reverse, false);
+    assert.equal(scored.trend, 1.31);
+  });
+
+  it("ne prend pas « holo » pour une reverse sur une Rare Holo", () => {
+    // Le Dracaufeu du Set de Base brille d'origine : « holo » décrit la
+    // version standard, et la carte n'a pas de reverse.
+    const scored = cote("Dracaufeu holo 4/102 Set de Base", DRACAUFEU);
+    assert.equal(scored.match.reverse, false);
+    assert.equal(scored.trend, 100);
   });
 });

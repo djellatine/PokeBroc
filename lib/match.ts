@@ -58,6 +58,11 @@ export interface MatchSignals {
    * par espèce, jamais deux. Ne se lève que si le numéro manque.
    */
   unique: boolean;
+  /**
+   * Tirage reverse annoncé dans le titre : l'écart se mesure à la cote reverse
+   * de Cardmarket, pas à celle de la version standard.
+   */
+  reverse: boolean;
   score: number;
 }
 
@@ -106,6 +111,18 @@ const BULK_WORDS = [
 ];
 
 const GRADED_WORDS = ["psa", "pca", "beckett", "bgs", "cgc", "gradee", "gradees", "slab", "ccc"];
+
+/**
+ * Le tirage reverse, annoncé comme tel. Cardmarket le cote à part — c'est le
+ * sens des champs `-holo` de TCGdex — et l'écart doit se mesurer à cette
+ * cote-là : une Kyogre 15/106 reverse vaut 52 €, la normale 1,31 €.
+ */
+const REVERSE_WORDS = ["reverse", "rev", "reverse holo"];
+/**
+ * « Holo » ne dit reverse que sur une carte dont le tirage normal ne brille
+ * pas : sur une Rare Holo, c'est la version standard qu'on décrit.
+ */
+const HOLO_WORDS = ["holo", "holographique", "holographic", "brillante"];
 
 /**
  * Reproductions. Elles sont nombreuses sur Vinted, souvent honnêtement
@@ -518,7 +535,19 @@ export function scoreItem<T extends Scorable>(item: T, card: CardDetail): Scored
   // l'annonce ne survit pas à la collecte, elle n'est donc même pas archivée.
   if (junk) score -= 8;
 
-  const trend = card.pricing?.cardmarket?.trend ?? card.pricing?.cardmarket?.avg30 ?? null;
+  // La cote du bon tirage. Un titre qui dit « reverse » se compare à la cote
+  // reverse ; « holo » aussi, mais seulement sur une carte dont le tirage
+  // normal ne brille pas — voir `HOLO_WORDS`. Sans cote reverse connue, on
+  // garde la normale plutôt que rien : l'écart sera lisible, et marqué.
+  const market = card.pricing?.cardmarket;
+  const plainNotHolo =
+    card.variants?.normal === true && card.variants?.holo === false && card.variants?.reverse === true;
+  const reverse =
+    (hasAny(title, REVERSE_WORDS) || (plainNotHolo && hasAny(title, HOLO_WORDS))) &&
+    card.variants?.reverse === true;
+  const reverseTrend = market?.["trend-holo"] ?? market?.["avg30-holo"] ?? null;
+  const trend =
+    (reverse && reverseTrend ? reverseTrend : null) ?? market?.trend ?? market?.avg30 ?? null;
   const price = item.totalPrice ?? item.price;
   const vsMarket =
     trend && trend > 0 && price !== null && !otherPrint && !otherLanguage
@@ -539,6 +568,7 @@ export function scoreItem<T extends Scorable>(item: T, card: CardDetail): Scored
       language,
       otherLanguage,
       unique,
+      reverse,
       score,
     },
     trend,

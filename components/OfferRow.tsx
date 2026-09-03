@@ -41,6 +41,22 @@ export function JapaneseChip({ cardId }: { cardId: string }) {
   );
 }
 
+/**
+ * D'où vient la cote affichée. « cote FR » quand c'est la cote française
+ * relevée sur Cardmarket, « cote » quand c'est la tendance TCGdex — toutes
+ * langues et tous états confondus, ce que l'infobulle précise, parce que c'est
+ * la question qu'on se pose devant un +54 % sur une carte au prix du marché.
+ */
+export function trendLabel(card: FeedCard): string {
+  return card.trendBasis === "fr" ? "cote FR" : "cote";
+}
+
+export function trendHint(card: FeedCard): string {
+  return card.trendBasis === "fr"
+    ? "Cote française : médiane des trois offres Cardmarket les moins chères, en français, en état EX ou mieux"
+    : "Tendance Cardmarket de la carte, toutes langues et tous états confondus — la version reverse a la sienne";
+}
+
 export function deviationStyle(vsMarket: number): string {
   if (vsMarket <= -15) return "border-good/40 bg-good/15 text-good";
   if (vsMarket >= 20) return "border-bad/30 bg-bad/10 text-bad";
@@ -182,8 +198,8 @@ export default function OfferRow({
           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-faint">
             {item.condition && <span>{CONDITION_LABELS[item.condition]}</span>}
             {item.trend !== null && (
-              <span title="Tendance Cardmarket pour la version standard">
-                cote {euro(item.trend)}
+              <span title={trendHint(card)}>
+                {trendLabel(card)} {euro(item.trend)}
               </span>
             )}
             {posted && <span title={postedHint(item.source)}>{posted}</span>}
