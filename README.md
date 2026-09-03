@@ -874,7 +874,7 @@ pip install curl_cffi tzdata
 python collect/lbc.py              # fenêtre de 3 h, écrit .data/lbc/recents.json
 python collect/lbc.py --dry-run    # n'écrit rien, résume sur la sortie
 python collect/lbc.py --window 6   # remonter plus loin
-python collect/test_lbc.py         # 18 tests, sans réseau
+python collect/test_lbc.py         # 28 tests, sans réseau
 ```
 
 Il tourne sur minuterie, jamais à la demande du site, **au quart d'heure**. La fenêtre reste de trois
@@ -941,6 +941,15 @@ Le journal existe parce que le code de sortie seul est indéchiffrable — Windo
 | `1` | rien collecté et toutes les requêtes en erreur |
 | `2` | bloqué à l'amorçage : Datadome a refusé la page d'accueil |
 | `3` | exception inattendue, détaillée dans le journal |
+
+Une panne de **réseau** n'est ni un refus ni une exception inattendue. Relevé sur la tablette le
+3 septembre 2026 : vingt-deux passages sur soixante-treize tombés sur « Could not resolve host
+www.leboncoin.fr », par rafales d'un quart d'heure, plus un délai de trente secondes dépassé qui,
+lui, n'était pas rattrapé dans la boucle des cartes et emportait le passage entier, trace Python
+comprise, lots pourtant déjà relevés. Ces pannes durent moins qu'un passage : `Unreachable` les
+distingue de `Blocked`, `patiently` leur donne une seconde chance après six secondes — une seule,
+le passage suivant vaut mieux qu'une attente — et la boucle des cartes les note comme un blocage
+et poursuit avec la carte suivante.
 
 Le collecteur reste poli : 2 s entre deux requêtes, empreinte de navigateur tirée au sort à chaque
 exécution, et arrêt anticipé dès qu'une page sort de la fenêtre — en pratique 9 requêtes par

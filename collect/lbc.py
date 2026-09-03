@@ -177,6 +177,33 @@ class Blocked(RuntimeError):
     """Datadome a refusé la requête."""
 
 
+class Unreachable(RuntimeError):
+    """Le réseau, pas Datadome : nom irrésoluble, délai dépassé, connexion perdue.
+
+    Relevé sur la tablette le 3 septembre 2026 : vingt-deux passages sur
+    soixante-treize ont échoué sur « Could not resolve host www.leboncoin.fr »,
+    par rafales d'un quart d'heure, plus un délai de trente secondes dépassé.
+    Ces pannes-là durent moins qu'un passage, d'où `patiently`.
+    """
+
+
+# Avant la seconde chance d'une requête tombée sur le réseau.
+UNREACHABLE_PAUSE_S = 6.0
+
+
+def patiently(task):
+    """Une seconde chance à une panne de réseau, après une courte pause.
+
+    Une seule : au-delà, ce n'est plus une rafale, et le passage suivant, un
+    quart d'heure plus tard, vaut mieux qu'une attente ici.
+    """
+    try:
+        return task()
+    except Unreachable:
+        time.sleep(UNREACHABLE_PAUSE_S)
+        return task()
+
+
 def parse_date(raw: str | None) -> int | None:
     """`'2026-08-05 11:02:33'`, heure de Paris, vers un epoch en millisecondes.
 
@@ -260,7 +287,10 @@ def new_session(impersonate: str) -> requests.Session:
     """
     session = requests.Session(impersonate=impersonate)
     session.headers.update({"Accept-Language": "fr-FR,fr;q=0.9"})
-    response = session.get(HOST + "/", timeout=TIMEOUT_S)
+    try:
+        response = session.get(HOST + "/", timeout=TIMEOUT_S)
+    except requests.exceptions.RequestException as error:
+        raise Unreachable(f"amorçage : {error}") from error
     if response.status_code != 200:
         raise Blocked(f"amorçage refusé (HTTP {response.status_code})")
     return session
@@ -289,7 +319,7 @@ def open_session(verbose: bool) -> tuple[requests.Session, str]:
 
     for attempt, impersonate in enumerate(random.sample(IMPERSONATIONS, MAX_ATTEMPTS), 1):
         try:
-            return new_session(impersonate), impersonate
+            return patiently(lambda: new_session(impersonate)), impersonate
         except Blocked as error:
             last = error
             if verbose:
@@ -310,7 +340,10 @@ def search(session: requests.Session, query: str, page: int) -> list[dict]:
         f"?text={quote_plus(query)}"
         f"&sort=time&order=desc&page={page}"
     )
-    response = session.get(url, timeout=TIMEOUT_S)
+    try:
+        response = session.get(url, timeout=TIMEOUT_S)
+    except requests.exceptions.RequestException as error:
+        raise Unreachable(f"réseau sur « {query} » page {page} : {error}") from error
 
     if response.status_code in (403, 429):
         raise Blocked(f"HTTP {response.status_code} sur « {query} » page {page}")
@@ -345,7 +378,7 @@ def collect(
 
             for attempt in range(1, MAX_ATTEMPTS + 1):
                 try:
-                    ads = search(session, query, page)
+                    ads = patiently(lambda: search(session, query, page))
                     break
                 except Blocked as error:
                     if attempt == MAX_ATTEMPTS:
@@ -432,7 +465,7 @@ def collect_cards(
 
         time.sleep(THROTTLE_S)
         try:
-            ads = search(session, query, 1)
+            ads = patiently(lambda: search(session, query, 1))
         except Blocked as error:
             # Le passage garde ce qu'il a. Une carte non rafraîchie conserve
             # ses annonces précédentes, que `LBC_CARD_MAX_AGE_MS` périmera si
@@ -440,6 +473,10 @@ def collect_cards(
             problems.append(str(error))
             continue
         except (RuntimeError, ValueError, KeyError) as error:
+            # `Unreachable` compris : une panne de réseau qui a survécu à sa
+            # seconde chance ne vaut pas d'abandonner les cartes suivantes.
+            # Avant, elle n'était pas rattrapée ici et emportait le passage
+            # entier, trace Python comprise, lots pourtant déjà relevés.
             problems.append(str(error))
             continue
 

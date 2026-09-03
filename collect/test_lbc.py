@@ -218,5 +218,64 @@ class Rotation(unittest.TestCase):
         self.assertEqual((cards, offset, problems), ({}, 0, []))
 
 
+class Reseau(unittest.TestCase):
+    """Les pannes de réseau, distinctes des refus de Datadome.
+
+    Relevé sur la tablette le 3 septembre 2026 : vingt-deux passages tombés sur
+    un nom irrésoluble, un sur un délai dépassé — et ce dernier emportait le
+    passage entier, faute d'être rattrapé dans la boucle des cartes.
+    """
+
+    def setUp(self):
+        patch = mock.patch.object(lbc.time, "sleep")
+        self.sleep = patch.start()
+        self.addCleanup(patch.stop)
+
+    def test_une_erreur_curl_devient_unreachable(self):
+        session = mock.Mock()
+        session.get.side_effect = lbc.requests.exceptions.DNSError("Could not resolve host")
+        with self.assertRaises(lbc.Unreachable) as caught:
+            lbc.search(session, "lot cartes pokemon", 1)
+        self.assertNotIsInstance(caught.exception, Blocked)
+        self.assertIn("Could not resolve host", str(caught.exception))
+
+    def test_une_seconde_chance_apres_une_pause(self):
+        calls = []
+
+        def flaky():
+            calls.append(1)
+            if len(calls) == 1:
+                raise lbc.Unreachable("réseau")
+            return "ok"
+
+        self.assertEqual(lbc.patiently(flaky), "ok")
+        self.assertEqual(len(calls), 2)
+        self.sleep.assert_called_once_with(lbc.UNREACHABLE_PAUSE_S)
+
+    def test_pas_de_troisieme_chance(self):
+        def down():
+            raise lbc.Unreachable("réseau")
+
+        with self.assertRaises(lbc.Unreachable):
+            lbc.patiently(down)
+
+    def test_une_carte_injoignable_ne_stoppe_pas_la_tranche(self):
+        queries = [{"cardId": f"c{i}", "query": f"carte {i}"} for i in range(3)]
+
+        def fake_search(session, query, page):
+            if query == "carte 1":
+                raise lbc.Unreachable("réseau sur « carte 1 »")
+            return [ad(hash(query) % 10_000, query)]
+
+        with mock.patch.object(lbc, "search", fake_search), mock.patch.object(lbc, "CARD_SLICE", 3):
+            cards, offset, problems = collect_cards(None, queries, {}, verbose=False)
+
+        # Les deux autres cartes sont relevées, la panne est notée, le tour avance.
+        self.assertEqual(sorted(cards), ["c0", "c2"])
+        self.assertEqual(offset, 0)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("carte 1", problems[0])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
