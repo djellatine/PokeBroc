@@ -529,3 +529,25 @@ describe("scoreItem — cartes japonaises de Bulbapedia", () => {
     assert.equal(bestQuery(SALAMECHE_MCDO_JA), "Salamèche 004/018");
   });
 });
+
+describe("scoreItem — nom sans homonyme", () => {
+  it("fait une forte d'une Gold Star nommée sans numéro", () => {
+    // « Métalosse gold star espèce Delta » à 1 899 € restait à 7, jamais
+    // annoncée, alors qu'il n'existe qu'une Gold Star par espèce.
+    const match = scoreItem(
+      makeItem({ title: "Dracaufeu Gold Star Île des Dragons" }),
+      DRACAUFEU_STAR,
+    ).match;
+    assert.equal(match.number, false);
+    assert.equal(match.unique, true);
+    assert.ok(match.score >= STRONG_SCORE);
+  });
+
+  it("ne s'applique ni aux cartes ordinaires ni quand le numéro est là", () => {
+    assert.equal(score("Dracaufeu Set de Base").unique, false);
+    assert.equal(
+      scoreItem(makeItem({ title: "Dracaufeu Gold Star 100/101" }), DRACAUFEU_STAR).match.unique,
+      false,
+    );
+  });
+});

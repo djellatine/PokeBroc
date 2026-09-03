@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { offerText, selectFresh } from "../lib/alerts.ts";
-import { buildEmbeds } from "../lib/discord.ts";
+import { buildEmbeds, buildMessages } from "../lib/discord.ts";
 import type { FeedCard, FeedItem } from "../lib/feed.ts";
 
 const NOW = 1_700_000_000_000;
@@ -127,5 +127,51 @@ describe("buildEmbeds", () => {
     const many = Array.from({ length: 30 }, (_, index) => item({ id: `vinted:${index}` }));
     const [embed] = buildEmbeds([{ card: CARD, items: many }], 25);
     assert.equal(embed.description.split("\n").length, 25);
+  });
+});
+
+describe("buildMessages", () => {
+  const many = (count: number, cardId = "base1-4") =>
+    Array.from({ length: count }, (_, index) => item({ id: `${cardId}:${index}`, cardId }));
+
+  it("tient en un message sous les plafonds", () => {
+    const { messages, shown, total } = buildMessages([{ card: CARD, items: many(3) }]);
+    assert.equal(messages.length, 1);
+    assert.equal(shown, 3);
+    assert.equal(total, 3);
+    assert.match(messages[0].content, /3 nouvelles annonces/);
+    assert.doesNotMatch(messages[0].content, /sur le site/);
+  });
+
+  it("cite toutes les annonces d'une rafale, sur plusieurs messages", () => {
+    // Trente annonces d'une même carte : avant, vingt-cinq citées, cinq comptées.
+    const { messages, shown } = buildMessages([{ card: CARD, items: many(30) }]);
+    assert.equal(messages.length, 2);
+    assert.equal(shown, 30);
+    assert.equal(messages[0].embeds[0].description.split("\n").length, 25);
+    assert.equal(messages[1].embeds[0].description.split("\n").length, 5);
+    assert.match(messages[0].content, /\(1\/2\)/);
+    assert.match(messages[1].content, /\(2\/2\)/);
+  });
+
+  it("ne dépasse pas dix cartes par message", () => {
+    const groups = Array.from({ length: 12 }, (_, index) => ({
+      card: { ...CARD, cardId: `carte-${index}` },
+      items: many(1, `carte-${index}`),
+    }));
+    const { messages, shown } = buildMessages(groups);
+    assert.equal(messages.length, 2);
+    assert.equal(messages[0].embeds.length, 10);
+    assert.equal(messages[1].embeds.length, 2);
+    assert.equal(shown, 12);
+  });
+
+  it("renvoie au site seulement passé le nombre maximal de messages", () => {
+    const { messages, shown, total } = buildMessages([{ card: CARD, items: many(60) }], 25, 2);
+    assert.equal(messages.length, 2);
+    assert.equal(shown, 50);
+    assert.equal(total, 60);
+    assert.match(messages[1].content, /et 10 autres, sur le site/);
+    assert.doesNotMatch(messages[0].content, /sur le site/);
   });
 });

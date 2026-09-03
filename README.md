@@ -31,6 +31,7 @@ Chaque annonce est donc re-notée côté serveur à partir du titre :
 | Nom de la carte présent | +4 |
 | Numéro imprimé (`4/102`, `n°4`, `#4`) | +4 |
 | Nom de l'extension | +3 |
+| Nom sans homonyme, quand le numéro manque (Gold Star) | +4 |
 | Lot / classeur / display | −2 |
 | Annonce sponsorisée | −1 |
 | Reproduction (`custom`, `proxy`, `orica`…) | −8 |
@@ -505,6 +506,24 @@ annoncée est justement filtrée — et un lien qui ne montre rien décrédibili
 La règle vit dans `lib/alerts.ts`, pas dans le script : c'est une décision métier, elle se teste sans
 réseau (`tests/alerts.test.ts`). La mise en forme et l'envoi vers Discord vivent à part, dans
 `lib/discord.ts`.
+
+Deux alertes qui passaient à la trappe, relevées le 3 septembre 2026 :
+
+- **Une rafale.** Un seul message partait, plafonné à dix cartes et vingt-cinq annonces ; le reste
+  n'était que compté — « … et 14 autres, sur le site » — puis marqué comme annoncé, donc jamais
+  cité. Or une rafale est précisément le moment où l'on veut tout voir : après une panne de Vinted,
+  ou une soirée où vingt vendeurs postent. `buildMessages` poste désormais autant de messages qu'il
+  faut, numérotés, à 1,2 s d'intervalle ; le renvoi au site ne vaut plus que passé huit messages,
+  soit deux cents annonces.
+- **Un nom sans homonyme.** « Métalosse gold star espèce Delta » à 1 899 € restait à 7 — nom et
+  extension, pas de numéro — donc jamais annoncée, alors qu'il n'existe qu'une Gold Star par espèce.
+  Sur ces cartes, le nom vaut le numéro (`unique` dans `MatchSignals`). Les autres raretés à nom —
+  ex, GX, V — existent en dix versions par espèce et ne bénéficient pas de la règle.
+
+Reste le cas qui n'est pas une trappe mais une confusion : le site découvre des annonces à chaque
+visite — elles portent la pastille « nouveau » — mais seule la veille alerte. Un serveur de
+développement sur un autre poste montre donc des nouveautés sans jamais rien envoyer, et ce n'est
+pas la tablette qui a oublié.
 
 ### Deux processus, un seul écrivain par fichier
 

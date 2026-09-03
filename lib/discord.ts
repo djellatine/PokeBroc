@@ -89,10 +89,88 @@ function countItems(groups: AlertGroup[]): number {
 }
 
 /**
+ * Messages qu'un passage peut poster. Huit messages, c'est deux cents annonces :
+ * au-delà, il s'est passé quelque chose d'anormal — une panne de plusieurs
+ * heures qui se rattrape — et le lecteur préfère un renvoi au site.
+ */
+export const MAX_MESSAGES = 8;
+
+export interface DiscordMessage {
+  content: string;
+  embeds: DiscordEmbed[];
+}
+
+/**
+ * Découpe les alertes en messages, chacun sous les plafonds de Discord.
+ *
+ * Avant, un seul message partait, et tout ce qui dépassait ses vingt-cinq
+ * annonces n'était que compté — « … et 14 autres, sur le site » — puis marqué
+ * comme annoncé. Les annonces au-delà de la vingt-cinquième n'étaient donc
+ * jamais citées, alors qu'une rafale est précisément le moment où l'on veut
+ * tout voir : après une panne de Vinted, ou une soirée où vingt vendeurs
+ * postent. On poste désormais autant de messages qu'il faut, et le renvoi au
+ * site ne vaut plus que passé `MAX_MESSAGES`.
+ *
+ * Une carte aux nombreuses annonces peut s'étaler sur deux messages ; chaque
+ * message garde au plus `MAX_EMBEDS` cartes et `MAX_ALERTS` annonces.
+ */
+export function buildMessages(
+  groups: AlertGroup[],
+  perMessage = MAX_ALERTS,
+  maxMessages = MAX_MESSAGES,
+): { messages: DiscordMessage[]; shown: number; total: number } {
+  const total = countItems(groups);
+
+  // Tranches de groupes, chacune sous les deux plafonds.
+  const chunks: AlertGroup[][] = [];
+  let chunk: AlertGroup[] = [];
+  let items = 0;
+  const close = () => {
+    if (chunk.length > 0) chunks.push(chunk);
+    chunk = [];
+    items = 0;
+  };
+  for (const group of groups) {
+    let offset = 0;
+    while (offset < group.items.length) {
+      if (chunk.length >= MAX_EMBEDS || items >= perMessage) close();
+      const slice = group.items.slice(offset, offset + (perMessage - items));
+      chunk.push({ card: group.card, items: slice });
+      items += slice.length;
+      offset += slice.length;
+    }
+  }
+  close();
+
+  const kept = chunks.slice(0, maxMessages);
+  let shown = 0;
+  const messages = kept.map((part, index) => {
+    const embeds = buildEmbeds(part, perMessage);
+    shown += embeds.reduce((n, embed) => n + embed.description.split("\n").length, 0);
+    const header = `🔔 **${plural(total, "nouvelle annonce", "nouvelles annonces")}**`;
+    const page = kept.length > 1 ? ` (${index + 1}/${kept.length})` : "";
+    const footer =
+      index === kept.length - 1 && total > shown
+        ? `\n… et ${plural(total - shown, "autre")}, sur le site.`
+        : "";
+    return { content: header + page + footer, embeds };
+  });
+
+  return { messages, shown, total };
+}
+
+/** Discord admet une trentaine de messages par minute sur un webhook : on ne se presse pas. */
+const BETWEEN_MESSAGES_MS = 1_200;
+
+/**
  * Envoie les alertes au webhook. Rend le nombre d'annonces annoncées et une
  * erreur éventuelle — jamais ne lève, pour que la veille traite un webhook muet
  * comme une place de marché en panne : le repère des alertes ne bouge alors pas
  * et les annonces repartent au passage suivant.
+ *
+ * Plusieurs messages s'il le faut. Un échec en cours de route rend l'erreur,
+ * et le repère ne bouge pas : les annonces déjà postées repartiront au passage
+ * suivant, en doublon — le prix d'une règle simple, et un cas rare.
  */
 export async function sendAlerts(
   groups: AlertGroup[],
@@ -100,32 +178,29 @@ export async function sendAlerts(
   const url = webhookUrl();
   if (!url) return { sent: 0, error: "DISCORD_WEBHOOK_URL absent" };
 
-  const embeds = buildEmbeds(groups);
-  if (embeds.length === 0) return { sent: 0, error: null };
+  const { messages, shown } = buildMessages(groups);
+  if (messages.length === 0) return { sent: 0, error: null };
 
-  const total = countItems(groups);
-  const shown = embeds.reduce((n, embed) => n + embed.description.split("\n").length, 0);
-  const header = `🔔 **${plural(total, "nouvelle annonce", "nouvelles annonces")}**`;
-  const footer = total > shown ? `\n… et ${plural(total - shown, "autre")}, sur le site.` : "";
-
-  try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        username: "PokeBroc",
-        content: header + footer,
-        embeds,
-        allowed_mentions: { parse: [] },
-      }),
-    });
-    if (!response.ok) {
-      return { sent: 0, error: `Discord a refusé (HTTP ${response.status}).` };
+  for (const [index, message] of messages.entries()) {
+    if (index > 0) await new Promise((resolve) => setTimeout(resolve, BETWEEN_MESSAGES_MS));
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: "PokeBroc",
+          ...message,
+          allowed_mentions: { parse: [] },
+        }),
+      });
+      if (!response.ok) {
+        return { sent: 0, error: `Discord a refusé (HTTP ${response.status}).` };
+      }
+    } catch (error) {
+      return { sent: 0, error: error instanceof Error ? error.message : "Discord injoignable." };
     }
-    return { sent: shown, error: null };
-  } catch (error) {
-    return { sent: 0, error: error instanceof Error ? error.message : "Discord injoignable." };
   }
+  return { sent: shown, error: null };
 }
 
 /**

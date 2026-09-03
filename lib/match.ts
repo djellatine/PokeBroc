@@ -53,6 +53,11 @@ export interface MatchSignals {
    * visible, mais sans écart à la cote, et jamais forte.
    */
   otherLanguage: boolean;
+  /**
+   * Le nom seul suffit à désigner la carte, et vaut le numéro : une Gold Star
+   * par espèce, jamais deux. Ne se lève que si le numéro manque.
+   */
+  unique: boolean;
   score: number;
 }
 
@@ -319,6 +324,13 @@ const OTHER_LANGUAGE_WORDS = [
   "english",
 ];
 
+/**
+ * Marques d'un nom sans homonyme, dans la graphie de `searchName`. « Gold
+ * star » seulement : les 27 cartes ☆ sont une par espèce. Les autres
+ * raretés à nom — ex, GX, V — existent en dix versions par espèce.
+ */
+const UNIQUE_NAME_MARKERS = ["gold star"];
+
 /** Katakanas, hiraganas, kanjis : un nom que la table n'a pas su traduire. */
 const JAPANESE_SCRIPT = /[\p{scx=Hiragana}\p{scx=Katakana}\p{scx=Han}]/u;
 
@@ -430,6 +442,14 @@ export function scoreItem<T extends Scorable>(item: T, card: CardDetail): Scored
   const language = japanese && hasAny(title, JAPANESE_WORDS);
   const otherLanguage = japanese && hasAny(title, OTHER_LANGUAGE_WORDS);
 
+  /**
+   * Le nom seul désigne la carte : il n'existe qu'une Gold Star par espèce.
+   * « Métalosse gold star espèce Delta » à 1 899 € restait à 7 — nom et
+   * extension, pas de numéro — donc jamais annoncée, alors que rien d'autre
+   * ne s'appelle ainsi. Sur ces cartes, le nom vaut le numéro.
+   */
+  const unique = name && !number && UNIQUE_NAME_MARKERS.some((mark) => cardName.includes(mark));
+
   // La source prime sur le titre quand elle sait : `?? ` et non `||`, pour
   // qu'un `false` déclaré par eBay ne soit pas réécrit par un « psa » du titre.
   const graded = item.graded ?? hasAny(title, GRADED_WORDS);
@@ -469,7 +489,7 @@ export function scoreItem<T extends Scorable>(item: T, card: CardDetail): Scored
 
   let score = 0;
   if (name) score += 4;
-  if (number) score += 4;
+  if (number || unique) score += 4;
   if (set) score += 3;
   // Deux points, pas quatre : « Pikachu japonaise » sans numéro reste une
   // correspondance large, il y a cent Pikachu japonaises. Mais numéro et code
@@ -509,6 +529,7 @@ export function scoreItem<T extends Scorable>(item: T, card: CardDetail): Scored
       otherPrint,
       language,
       otherLanguage,
+      unique,
       score,
     },
     trend,
