@@ -274,6 +274,27 @@ marché. TCGdex les connaît, dans une base séparée : 184 extensions et la cot
 aussi du japonais. Ce qu'il n'a pas, c'est le nom français — la base japonaise ne parle que
 katakanas, sans numéro de Pokédex — ni, le plus souvent, le visuel : 3 882 cartes sur 12 781 en
 ont un (mesuré le 3 septembre 2026), et aucune promo SV-P ou M-P, précisément celles qu'on suit.
+Ni, surtout, la moitié des cartes : 18 Salamèche quand la base française en compte 46, rien avant
+1999, rien des promos d'enseigne — la Salamèche McDonald's de 2002, celle qu'on cherchait, n'y
+est pas.
+
+D'où un **second catalogue, Bulbapedia** (`lib/bulbapedia.ts`), qui tient pour chaque espèce la
+liste de toutes ses impressions dans un gabarit régulier (`{{card list/release|jpset=…|jpnum=…}}`)
+et, pour chaque carte, une page avec le nom japonais, le visuel et ses sorties. La recherche « JP »
+interroge les deux et fusionne : TCGdex d'abord, pour sa cote, Bulbapedia pour tout ce qui manque,
+une carte n'étant ajoutée que si son numéro imprimé n'est pas déjà là (`printedKey` rapproche
+« 004/018 » de « 004 » sur 18). Mesuré sur Salamèche : 62 cartes au lieu de 18. Une carte venue
+de là porte l'identifiant `jb:{page}|{numéro}` (`jb:Charmander (McDonald Pack 4)|004/018`), n'a
+pas de cote — le fil montre ses annonces sans écart — et son visuel vient des archives
+Bulbagarden, que le cache local relaie aussi, en se présentant : le wiki refuse les clients
+anonymes, et on ne lui demande jamais plus de quatre pages à la fois.
+
+Deux traits des cartes japonaises anciennes que la notation apprend au passage : le total
+s'imprime sur autant de chiffres que le numéro (« 004/018 », que « 004/18 » ne trouverait pas), et
+les cartes d'avant 2008 n'ont pas de numéro de collection du tout — elles se cherchent par le nom
+et « carte pokemon japonaise », la notation trie. Les extensions nommées en anglais se cherchent
+par leurs mots, comme les françaises, et « McDonald's » vaut aussi « McDo » et « MacDo », que les
+vendeurs écrivent bien plus volontiers.
 Pour le visuel, deux replis, dans cet ordre. TCGdex donne l'identifiant TCGplayer de chaque
 tirage, et TCGplayer sert l'image par cet identifiant seul : `getCard` le range dans `image` sous
 la forme `tcgplayer:587758`, que seule `cardImage` sait lire. Mais TCGplayer n'a ni les anciennes
@@ -542,9 +563,9 @@ pour un fichier de 18 Ko**, des `502` par salves, et des requêtes qui n'aboutis
 
 1. **Cache disque** (`lib/image-cache.ts` + `/api/carte-image`) — le visuel est téléchargé une fois
    puis servi depuis `.data/img-cache`. Mesuré : 20 s à froid pour 18 images, **122 ms à chaud**.
-   Le proxy n'accepte que `assets.tcgdex.net`, les deux CDN de TCGplayer et celui de Cardmarket
-   (visuels des cartes japonaises absentes de TCGdex), sinon il servirait de relais vers n'importe
-   quelle adresse.
+   Le proxy n'accepte que `assets.tcgdex.net`, les deux CDN de TCGplayer, celui de Cardmarket et
+   les archives Bulbagarden (visuels des cartes japonaises absentes de TCGdex), sinon il servirait
+   de relais vers n'importe quelle adresse.
 2. **Réponse à budget** — le navigateur n'attend jamais plus de 3 s. Au-delà il reçoit un échec, mais
    le téléchargement continue en arrière-plan et remplit le cache ; la vignette réessaie et l'image
    finit par apparaître. Sans ce garde-fou, dix-huit requêtes bloquées épuisent les connexions du
@@ -1154,6 +1175,7 @@ lib/
   image-cache.ts            cache disque des visuels, préchauffage, purge
   tcgdex.ts                 cartes, extensions, images, cotes — bases française et japonaise
   japanese.ts               noms japonais ↔ français, pour chercher et noter les cartes japonaises
+  bulbapedia.ts             second catalogue japonais : pages d'espèce et de carte de Bulbapedia
   pokedex-names.ts          table des espèces (ja, fr, en), générée depuis PokéAPI
   vinted.ts                 session, throttle, cache, normalisation
   lbc.ts                    lots et cartes leboncoin (aucune requête : voir collect/)
@@ -1177,8 +1199,8 @@ deploy/
     lancer.sh               les unités rejouées sans systemd — site, collecte, sauvegarde
     boot.sh                 démarrage automatique via Termux:Boot
     LISEZMOI.md             dossier de bord du serveur tablette — chemins, pannes, remèdes
-tests/                      node:test — match, japanese, tcgdex, ebay, rate-limit, sightings, format,
-                            alertes, store
+tests/                      node:test — match, japanese, bulbapedia, tcgdex, ebay, rate-limit, sightings,
+                            format, alertes, store
                             collect/test_lbc.py — normalisation et rotation, sans réseau
 ```
 

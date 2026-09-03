@@ -18,15 +18,24 @@ const API = "https://api.tcgdex.net/v2";
 type Lang = "fr" | "en" | "ja";
 
 export const JA_PREFIX = "ja:";
+/**
+ * Carte japonaise venue de Bulbapedia et non de TCGdex — voir
+ * `lib/bulbapedia.ts`. Défini ici, et non là-bas, parce que ce fichier est le
+ * seul des deux à pouvoir entrer dans le paquet client : la pastille « JP »
+ * du fil lit le préfixe, sans avoir à charger un lecteur de wikitexte.
+ */
+export const JB_PREFIX = "jb:";
+/** Bulbagarden refuse les clients anonymes ; on se présente, API et images. */
+export const BULBA_USER_AGENT = "PokeBroc/0.1 (veille perso de cartes Pokemon)";
 
-/** Carte de la base japonaise, d'après son identifiant. */
+/** Carte japonaise, d'après son identifiant — quelle qu'en soit la source. */
 export function isJapaneseId(cardId: string): boolean {
-  return cardId.startsWith(JA_PREFIX);
+  return cardId.startsWith(JA_PREFIX) || cardId.startsWith(JB_PREFIX);
 }
 
 /** Langue et identifiant tels que TCGdex les attend. */
 function locate(cardId: string): { lang: Lang; id: string } {
-  return isJapaneseId(cardId)
+  return cardId.startsWith(JA_PREFIX)
     ? { lang: "ja", id: cardId.slice(JA_PREFIX.length) }
     : { lang: "fr", id: cardId };
 }
@@ -133,8 +142,18 @@ export function cardImage(
     const [code, id] = image.slice(CARDMARKET_PREFIX.length).split("/");
     return `https://product-images.s3.cardmarket.com/51/${code}/${id}/${id}.jpg`;
   }
+  if (image.startsWith(BULBA_PREFIX)) {
+    // `Special:FilePath` redirige vers le fichier, et sait le réduire à la
+    // largeur demandée : 300 px pour une vignette, l'original pour la fiche.
+    const file = encodeURIComponent(image.slice(BULBA_PREFIX.length));
+    const base = `https://archives.bulbagarden.net/wiki/Special:FilePath/${file}`;
+    return quality === "high" ? base : `${base}?width=300`;
+  }
   return `${image}/${quality}.${ext}`;
 }
+
+/** Visuel hébergé par les archives Bulbagarden, désigné par son nom de fichier. */
+export const BULBA_PREFIX = "bulba:";
 
 /** Visuel TCGdex, sinon TCGplayer ; `undefined` s'il faut aller sonder Cardmarket. */
 export function fallbackImage(
@@ -227,9 +246,28 @@ export function cachedCardImage(
 export function cardNumber(card: CardDetail): string | null {
   if (!card.localId) return null;
   const total = card.set?.cardCount?.official;
+  // Le Japon imprime le total sur autant de chiffres que le numéro :
+  // « 004/018 », « 090/092 ». C'est ainsi que les vendeurs l'écrivent, et la
+  // recherche Vinted classe sur la chaîne exacte.
+  if (total && card.lang === "ja") {
+    return `${card.localId}/${String(total).padStart(card.localId.length, "0")}`;
+  }
   if (total) return `${card.localId}/${total}`;
   if (card.lang === "ja" && card.set?.id) return `${card.localId}/${card.set.id}`;
   return card.localId;
+}
+
+/**
+ * Clé d'un numéro imprimé, pour reconnaître la même carte d'un catalogue à
+ * l'autre : « 004/018 » chez Bulbapedia et « 004 » sur 18 chez TCGdex sont
+ * une seule impression. Les zéros de tête sautent, la casse aussi.
+ */
+export function printedKey(localId: string, denominator: string | number): string {
+  const part = (value: string | number) => {
+    const text = String(value).trim().toLowerCase();
+    return /^\d+$/.test(text) ? String(Number(text)) : text;
+  };
+  return `${part(localId)}/${part(denominator)}`;
 }
 
 function normalize(value: string): string {
@@ -282,15 +320,27 @@ function setIdOf(cardId: string): string | null {
   return cut > 0 ? cardId.slice(0, cut) : null;
 }
 
-const setsIndex = new Map<Lang, { at: number; value: Map<string, string> }>();
+interface SetSummary {
+  name: string;
+  /** Total imprimé sur les cartes, 0 quand l'extension n'en a pas (promos). */
+  official: number;
+}
 
-/** Table setId → nom d'extension, pour distinguer les rééditions d'une même carte. */
-async function getSetsIndex(lang: Lang = "fr"): Promise<Map<string, string>> {
+const setsIndex = new Map<Lang, { at: number; value: Map<string, SetSummary> }>();
+
+/** Table setId → extension, pour distinguer les rééditions d'une même carte. */
+async function getSetsIndex(lang: Lang = "fr"): Promise<Map<string, SetSummary>> {
   const cached = setsIndex.get(lang);
   if (cached && Date.now() - cached.at < 24 * 3600 * 1000) return cached.value;
   try {
-    const sets = await tcgdex<{ id: string; name: string }[]>("/sets", 86400, lang);
-    const map = new Map(sets.map((set) => [set.id, set.name]));
+    const sets = await tcgdex<{ id: string; name: string; cardCount?: { official?: number } }[]>(
+      "/sets",
+      86400,
+      lang,
+    );
+    const map = new Map(
+      sets.map((set) => [set.id, { name: set.name, official: set.cardCount?.official ?? 0 }]),
+    );
     setsIndex.set(lang, { at: Date.now(), value: map });
     return map;
   } catch {
@@ -383,7 +433,7 @@ export async function searchCards(
     .slice(0, limit)
     .map((card) => {
       const setId = setIdOf(card.id);
-      return { ...card, setId, setName: setId ? (sets.get(setId) ?? null) : null };
+      return { ...card, setId, setName: setId ? (sets.get(setId)?.name ?? null) : null };
     });
 }
 
@@ -401,28 +451,37 @@ function japaneseSetName(setId: string, name: string | undefined): string {
 }
 
 /**
- * Recherche dans la base japonaise, depuis une saisie française.
+ * Recherche dans les catalogues japonais, depuis une saisie française.
  *
- * TCGdex ne connaît que les katakanas : « pikachu » ne trouve rien côté `ja`.
- * La saisie est donc traduite en noms d'espèces japonais, chacun interrogé,
- * puis les résultats sont retraduits pour l'affichage. Une saisie déjà en
- * japonais part telle quelle — utile pour les cartes Dresseur, hors table.
+ * Deux sources, fusionnées. TCGdex d'abord : il a la cote Cardmarket, mais ne
+ * connaît que les katakanas — « pikachu » ne trouve rien côté `ja` — et
+ * manque des deux tiers des cartes. La saisie est donc traduite en noms
+ * d'espèces japonais, chacun interrogé, puis les résultats retraduits pour
+ * l'affichage. Bulbapedia ensuite, complet, pour tout ce que TCGdex n'a pas :
+ * ses cartes ne s'ajoutent que si leur numéro imprimé n'est pas déjà là, la
+ * version TCGdex gardant la priorité pour sa cote. Une saisie déjà en japonais
+ * ne va qu'à TCGdex — utile pour les cartes Dresseur, hors table.
  */
 async function searchJapanese(q: string, limit: number): Promise<CardListItem[]> {
-  const { japaneseCandidates, translateJapaneseName } = await import("./japanese");
+  const [{ japaneseCandidates, translateJapaneseName }, { searchBulbapedia }] =
+    await Promise.all([import("./japanese"), import("./bulbapedia")]);
   const candidates = japaneseCandidates(q);
-  if (candidates.length === 0) return [];
 
-  const [lists, sets] = await Promise.all([
+  const [lists, sets, bulba] = await Promise.all([
     Promise.all(candidates.map((name) => fetchByName(name, "ja"))),
     getSetsIndex("ja"),
+    searchBulbapedia(q),
   ]);
 
   const byId = new Map<string, CardBrief>();
   for (const card of lists.flat()) byId.set(card.id, card);
 
+  const seen = new Set<string>();
+
   const cards: CardListItem[] = [...byId.values()].map((card) => {
     const setId = setIdOf(card.id);
+    const set = setId ? sets.get(setId) : undefined;
+    if (setId) seen.add(printedKey(card.localId, set?.official || setId));
     return {
       ...card,
       id: JA_PREFIX + card.id,
@@ -430,15 +489,30 @@ async function searchJapanese(q: string, limit: number): Promise<CardListItem[]>
       nameJa: card.name,
       lang: "ja",
       setId,
-      setName: setId ? japaneseSetName(setId, sets.get(setId)) : null,
+      setName: setId ? japaneseSetName(setId, set?.name) : null,
     };
   });
+
+  for (const item of bulba) {
+    const [local, denominator] = item.printed?.split("/") ?? [];
+    if (local && denominator && seen.has(printedKey(local, denominator))) continue;
+    cards.push({
+      id: item.id,
+      localId: item.localId ?? "",
+      name: item.name,
+      nameJa: item.nameJa,
+      lang: "ja",
+      setId: item.setId,
+      setName: item.setName,
+    });
+  }
 
   return rank(cards, q).slice(0, limit);
 }
 
 /** Détail complet d'une carte (set, rareté, cote Cardmarket…). */
 export async function getCard(cardId: string): Promise<CardDetail | null> {
+  if (cardId.startsWith(JB_PREFIX)) return bulbaCard(cardId);
   const { lang, id } = locate(cardId);
   try {
     const card = await tcgdex<CardDetail>(`/cards/${encodeURIComponent(id)}`, 3600, lang);
@@ -446,6 +520,30 @@ export async function getCard(cardId: string): Promise<CardDetail | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * Carte Bulbapedia, mise à la forme de TCGdex. Pas de cote : Bulbapedia ne
+ * vend rien, le fil montre les annonces sans écart.
+ */
+async function bulbaCard(cardId: string): Promise<CardDetail | null> {
+  const { getBulbaCard } = await import("./bulbapedia");
+  const card = await getBulbaCard(cardId);
+  if (!card) return null;
+  return {
+    id: card.id,
+    localId: card.localId ?? "",
+    name: card.name,
+    lang: "ja",
+    ...(card.nameJa ? { nameJa: card.nameJa } : {}),
+    nameEn: card.nameEn,
+    ...(card.image ? { image: `${BULBA_PREFIX}${card.image}` } : {}),
+    set: card.set,
+    ...(card.rarity ? { rarity: card.rarity } : {}),
+    ...(card.hp ? { hp: card.hp } : {}),
+    ...(card.type ? { types: [card.type] } : {}),
+    ...(card.illustrator ? { illustrator: card.illustrator } : {}),
+  };
 }
 
 /** Carte japonaise telle que le reste du site la lit : nom français, préfixe, code du set. */

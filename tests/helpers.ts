@@ -132,3 +132,31 @@ export const NANJAMO_JA: CardDetail = {
     cardCount: { official: 0, total: 288 },
   },
 };
+
+/**
+ * Salamèche McDonald's 2002, `jb:…`, venue de Bulbapedia : extension nommée
+ * en anglais, total imprimé sur trois chiffres (« 004/018 »), pas de cote.
+ */
+export const SALAMECHE_MCDO_JA: CardDetail = {
+  id: "jb:Charmander (McDonald Pack 4)|004/018",
+  localId: "004",
+  name: "Salamèche",
+  nameJa: "ヒトカゲ",
+  nameEn: "Charmander",
+  lang: "ja",
+  set: {
+    id: "mcdonald-s-pokemon-e-minimum-pack",
+    name: "McDonald's Pokémon-e Minimum Pack",
+    cardCount: { official: 18, total: 18 },
+  },
+};
+
+/** Salamèche japonaise de 1996, sans numéro de collection. */
+export const SALAMECHE_1996_JA: CardDetail = {
+  id: "jb:Charmander (Base Set 46)|Expansion Pack",
+  localId: "",
+  name: "Salamèche",
+  nameEn: "Charmander",
+  lang: "ja",
+  set: { id: "expansion-pack", name: "Expansion Pack", cardCount: { official: 0, total: 0 } },
+};

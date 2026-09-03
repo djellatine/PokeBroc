@@ -28,9 +28,13 @@ export async function GET(request: NextRequest) {
   if (!src && cardId) {
     const resolved = await resolveCardImage(cardId);
     if (!resolved) {
+      // Cinq minutes, pas une heure : ce 404 dépend des replis que le serveur
+      // connaît, et une heure de cache navigateur a fait durer des vignettes
+      // vides bien après que le repli manquant fut ajouté — le composant
+      // réessayait, le navigateur lui resservait son 404.
       return new Response("Aucun visuel connu pour cette carte.", {
         status: 404,
-        headers: { "Cache-Control": "public, max-age=3600" },
+        headers: { "Cache-Control": "public, max-age=300" },
       });
     }
     src = cardImage(resolved.image, params.get("q") === "high" ? "high" : "low") ?? "";

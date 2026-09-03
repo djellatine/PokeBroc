@@ -10,7 +10,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { CARDMARKET_REFERER } from "./tcgdex";
+import { BULBA_USER_AGENT, CARDMARKET_REFERER } from "./tcgdex";
 
 const DIR = path.join(process.cwd(), ".data", "img-cache");
 
@@ -24,14 +24,18 @@ export const ALLOWED_HOSTS = new Set([
   "product-images.tcgplayer.com",
   "tcgplayer-cdn.tcgplayer.com",
   "product-images.s3.cardmarket.com",
+  "archives.bulbagarden.net",
 ]);
 
-/** Cardmarket répond 403 à toute image demandée sans `Referer` de chez lui. */
+/**
+ * Cardmarket répond 403 à toute image demandée sans `Referer` de chez lui ;
+ * Bulbagarden, à tout client qui ne se présente pas.
+ */
 function requestHeaders(url: string): Record<string, string> {
   const headers: Record<string, string> = { Accept: "image/webp,image/png,image/jpeg,image/*" };
-  if (new URL(url).hostname === "product-images.s3.cardmarket.com") {
-    headers.Referer = CARDMARKET_REFERER;
-  }
+  const host = new URL(url).hostname;
+  if (host === "product-images.s3.cardmarket.com") headers.Referer = CARDMARKET_REFERER;
+  if (host === "archives.bulbagarden.net") headers["User-Agent"] = BULBA_USER_AGENT;
   return headers;
 }
 

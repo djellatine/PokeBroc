@@ -13,9 +13,17 @@ import {
   fallbackImage,
   isJapaneseId,
   JA_PREFIX,
+  printedKey,
   TCGPLAYER_PREFIX,
 } from "../lib/tcgdex.ts";
-import { DRACAUFEU, NANJAMO_JA, PHYLLALI_JA, PIKACHU_JA, SANS_COTE } from "./helpers.ts";
+import {
+  DRACAUFEU,
+  NANJAMO_JA,
+  PHYLLALI_JA,
+  PIKACHU_JA,
+  SALAMECHE_MCDO_JA,
+  SANS_COTE,
+} from "./helpers.ts";
 
 describe("isJapaneseId", () => {
   it("reconnaît le préfixe, et rien d'autre", () => {
@@ -107,5 +115,19 @@ describe("cardmarketProductId", () => {
   it("ne rend rien sans identifiant", () => {
     assert.equal(cardmarketProductId({ pricing: { cardmarket: null } }), undefined);
     assert.equal(cardmarketProductId({}), undefined);
+  });
+});
+
+describe("cardNumber — total japonais", () => {
+  it("aligne le total sur les chiffres du numéro", () => {
+    assert.equal(cardNumber(SALAMECHE_MCDO_JA), "004/018");
+  });
+});
+
+describe("printedKey", () => {
+  it("rapproche les graphies d'une même impression", () => {
+    assert.equal(printedKey("004", "018"), printedKey("004", 18));
+    assert.equal(printedKey("052", "ADV-P"), printedKey("52", "adv-p"));
+    assert.notEqual(printedKey("004", "018"), printedKey("004", "165"));
   });
 });

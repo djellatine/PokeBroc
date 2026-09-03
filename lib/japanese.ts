@@ -39,7 +39,7 @@ function latin(value: string): string {
     .trim();
 }
 
-interface Species {
+export interface Species {
   ja: string;
   fr: string;
   en: string;
@@ -143,19 +143,34 @@ const MAX_CANDIDATES = 8;
  */
 export function japaneseCandidates(query: string): string[] {
   const q = query.trim();
-  if (!q) return [];
   if (hasJapaneseScript(q)) return [q.normalize("NFKC")];
+  return speciesCandidates(q).map((species) => species.ja);
+}
 
-  const needle = latin(q);
+/**
+ * Espèces que désigne une saisie française ou anglaise, dans les trois
+ * langues — pour interroger Bulbapedia, qui parle anglais, comme TCGdex, qui
+ * parle japonais. Même règle que `japaneseCandidates` : l'exact d'abord, puis
+ * les préfixes, dans l'ordre du Pokédex.
+ */
+export function speciesCandidates(query: string): Species[] {
+  const needle = latin(query);
   if (needle.length < 2) return [];
 
-  const exact: string[] = [];
-  const prefixed: string[] = [];
+  const exact: Species[] = [];
+  const prefixed: Species[] = [];
   for (const [ja, fr, en] of POKEDEX_NAMES) {
     const names = [latin(fr), latin(en)];
-    if (names.includes(needle)) exact.push(ja);
-    else if (names.some((name) => name.startsWith(needle))) prefixed.push(ja);
+    if (names.includes(needle)) exact.push({ ja, fr, en });
+    else if (names.some((name) => name.startsWith(needle))) prefixed.push({ ja, fr, en });
   }
 
-  return [...new Set([...exact, ...prefixed])].slice(0, MAX_CANDIDATES);
+  return [...exact, ...prefixed].slice(0, MAX_CANDIDATES);
+}
+
+/** Nom français d'une espèce désignée par son nom anglais, ou `null`. */
+export function frenchSpeciesName(english: string): string | null {
+  const needle = latin(english);
+  const found = POKEDEX_NAMES.find(([, , en]) => latin(en) === needle);
+  return found ? found[1] : null;
 }

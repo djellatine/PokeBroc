@@ -24,6 +24,8 @@ import {
   NANJAMO_JA,
   PHYLLALI_JA,
   PIKACHU_JA,
+  SALAMECHE_1996_JA,
+  SALAMECHE_MCDO_JA,
   SANS_COTE,
   makeItem,
 } from "./helpers.ts";
@@ -494,5 +496,36 @@ describe("suggestedQueries — cartes japonaises", () => {
   it("ne propose que le numéro pour une carte sans nom traduit", () => {
     const queries = suggestedQueries(NANJAMO_JA).map((entry) => entry.query);
     assert.deepEqual(queries, ["carte pokemon japonaise 121/SV-P"]);
+  });
+});
+
+describe("scoreItem — cartes japonaises de Bulbapedia", () => {
+  const ja = (title: string, card = SALAMECHE_MCDO_JA) => scoreItem(makeItem({ title }), card).match;
+
+  /** Relevé Vinted du 3 septembre 2026, requête « Salamèche 004/018 ». */
+  it("lit le total imprimé sur trois chiffres, et l'extension par « McDo »", () => {
+    for (const title of [
+      "Salameche / Charmander 004/018 promo Macdonald 2002",
+      "Charmander 004/018 promo macdo salameche",
+    ]) {
+      const match = ja(title);
+      assert.equal(match.number, true, `numéro non lu dans « ${title} »`);
+      assert.equal(match.set, true, `extension non lue dans « ${title} »`);
+      assert.ok(match.score >= STRONG_SCORE);
+    }
+  });
+
+  it("ne confond pas la McDo française de 2021", () => {
+    const match = ja("Salamèche 9/25 macdo 25 ans");
+    assert.equal(match.number, false);
+    assert.ok(match.score < STRONG_SCORE);
+  });
+
+  it("cherche large une carte sans numéro", () => {
+    assert.equal(bestQuery(SALAMECHE_1996_JA), "Salamèche carte pokemon japonaise");
+  });
+
+  it("compose la requête avec le total sur trois chiffres", () => {
+    assert.equal(bestQuery(SALAMECHE_MCDO_JA), "Salamèche 004/018");
   });
 });

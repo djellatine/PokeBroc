@@ -351,10 +351,25 @@ function setKeywords(setName: string): string[] {
     "set",
     "collection",
     "pokemon",
+    // Vocabulaire des extensions japonaises telles que Bulbapedia les nomme :
+    // « Charizard Starter Deck », « ADV-P Promotional cards », « Latias ex
+    // Half Deck ». Aucun de ces mots ne désigne une extension plutôt qu'une
+    // autre.
+    "pack",
+    "deck",
+    "cards",
+    "promotional",
+    "starter",
+    "half",
+    "expansion",
   ]);
-  return normalize(setName)
+  const words = normalize(setName)
     .split(/[^a-z0-9]+/)
     .filter((word) => word.length >= 4 && !stop.has(word));
+  // Les vendeurs français n'écrivent jamais « McDonald's » : c'est « McDo »,
+  // parfois « MacDo ». Vaut pour les promos françaises comme japonaises.
+  if (words.includes("mcdonald")) words.push("mcdo", "macdo", "macdonald");
+  return words;
 }
 
 export function scoreItem<T extends Scorable>(item: T, card: CardDetail): Scored<T> {
@@ -382,6 +397,14 @@ export function scoreItem<T extends Scorable>(item: T, card: CardDetail): Scored
       // L'espace est admise comme séparateur : `normalize` vient d'y ramener les
       // traits d'union, et « 4-102 » doit continuer de valoir « 4/102 ».
       total ? new RegExp(`\\b${local}\\s*[/\\s-]\\s*${total}\\b`, "i") : null,
+      // Le Japon imprime le total sur autant de chiffres que le numéro :
+      // « 004/018 », que « 004/18 » ne reconnaîtrait pas.
+      total && japanese
+        ? new RegExp(
+            `\\b${local}\\s*[/\\s-]\\s*${String(total).padStart(local.length, "0")}\\b`,
+            "i",
+          )
+        : null,
       new RegExp(`(?:^|[\\s(\\[#])n?[°o]?\\s*${local}(?:$|[\\s)\\]/,.-])`, "i"),
       // Les promos japonaises n'ont pas de total : le code de l'extension le
       // remplace, avant ou après le numéro — « 001/SV-P », « (SV-P 001) ».
@@ -393,13 +416,16 @@ export function scoreItem<T extends Scorable>(item: T, card: CardDetail): Scored
     number = patterns.some((re) => re.test(title));
   }
 
-  // Le nom d'une extension japonaise ne figure dans aucun titre français ;
-  // son code, si — « SV8a », « M-P ». Mot entier : « m p » est aussi la fin de
-  // « film pokemon ».
-  const keywords = japanese ? [] : card.set?.name ? setKeywords(card.set.name) : [];
-  const set = japanese
-    ? codes.length > 0 && hasAny(title, codes)
-    : keywords.length > 0 && keywords.some((word) => title.includes(word));
+  // Le nom japonais d'une extension ne figure dans aucun titre français ; son
+  // code, si — « SV8a », « M-P ». Mot entier : « m p » est aussi la fin de
+  // « film pokemon ». Une extension nommée en anglais (Bulbapedia :
+  // « McDonald's Pokémon-e Minimum Pack ») se cherche par ses mots, comme
+  // une française.
+  const latinSetName = card.set?.name && !JAPANESE_SCRIPT.test(card.set.name);
+  const keywords = latinSetName ? setKeywords(card.set!.name) : [];
+  const set =
+    (codes.length > 0 && hasAny(title, codes)) ||
+    (keywords.length > 0 && keywords.some((word) => title.includes(word)));
 
   const language = japanese && hasAny(title, JAPANESE_WORDS);
   const otherLanguage = japanese && hasAny(title, OTHER_LANGUAGE_WORDS);
@@ -667,6 +693,10 @@ export function bestQuery(card: CardDetail): string {
   if (card.lang === "ja" && JAPANESE_SCRIPT.test(name)) {
     return `carte pokemon japonaise ${printed ?? card.localId ?? ""}`.trim();
   }
+  // Carte japonaise d'avant les numéros de collection (jusqu'en 2008) : rien
+  // d'imprimé à chercher, et le nom anglais de son extension n'apparaît dans
+  // aucun titre. On ratisse large, la notation trie.
+  if (card.lang === "ja" && !card.localId) return `${name} carte pokemon japonaise`;
   // « Pikachu 001/SV-P » : 271 annonces, la première page entière sur la
   // bonne carte (mesuré le 3 septembre 2026). Rien à ajouter, surtout pas
   // « japonaise », que la moitié des vendeurs n'écrivent pas.
