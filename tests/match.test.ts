@@ -85,18 +85,20 @@ describe("scoreItem — une autre impression du même Pokémon", () => {
    * explicitement. Sept annonces de ce genre affichaient jusqu'à −85 % de la
    * cote d'une carte qu'elles ne vendaient pas.
    *
-   * On ne les écarte pas — tomber sur une autre impression de son Pokémon est
-   * un hasard qui vaut d'être vu. On leur retire l'écart, comme le fil le fait
-   * déjà d'une enchère eBay en cours : mieux vaut un écart vide qu'un faux.
+   * Elles perdent leur numéro, donc leur rang de forte : visibles en
+   * élargissant, sans écart, jamais annoncées. Sur la Carapuce McDonald's
+   * 007/018, vingt-sept « fortes » sur trente-deux étaient des 007/165 du 151.
    */
   // `makeItem` pose un prix de 50 € et la cote du gabarit vaut 100 € : l'écart
   // attendu est donc de −50 % quand il doit être calculé.
   const juge = (title: string) => scoreItem(makeItem({ title }), DRACAUFEU);
 
-  it("garde l'annonce mais lui retire son écart à la cote", () => {
+  it("la rétrograde sous le seuil strict, sans écart à la cote", () => {
     const other = juge("Dracaufeu 4/165 Expédition Wizards");
     assert.equal(other.match.otherPrint, true);
-    assert.ok(other.match.score >= STRONG_SCORE, "l'annonce doit rester visible");
+    assert.equal(other.match.number, false);
+    assert.ok(other.match.score < STRONG_SCORE, "une autre impression n'alerte pas");
+    assert.ok(other.match.score >= WIDE_SCORE, "mais reste visible en élargissant");
     assert.equal(other.vsMarket, null);
   });
 
@@ -575,5 +577,29 @@ describe("englishQuery", () => {
   it("figure parmi les suggestions de la fiche", () => {
     const queries = suggestedQueries(SALAMECHE_MCDO_JA).map((entry) => entry.query);
     assert.ok(queries.includes("Charmander 004/018"));
+  });
+});
+
+describe("scoreItem — le numéro nu ne suffit pas à une japonaise", () => {
+  /** Titres du relevé eBay du 3 septembre 2026 (« Squirtle 007 »), transposés à la Salamèche 004/018. */
+  it("ne prend pas une 007 d'une autre extension pour la 007/018", () => {
+    for (const title of [
+      "1998 Pokemon 004 Charmander Vending Gift Box Japonais 712",
+      "Carte Pokemon Charmander N°004 16 Old Back Intro Pack non holo Japonaise",
+      "Salamèche / Charmander 004/165 Sv2a Master Ball - Japanese",
+    ]) {
+      const match = scoreItem(makeItem({ title }), SALAMECHE_MCDO_JA).match;
+      assert.equal(match.number, false, `numéro lu à tort dans « ${title} »`);
+      assert.ok(match.score < STRONG_SCORE, `« ${title} » ne devrait pas être forte`);
+    }
+  });
+
+  it("reconnaît toujours le numéro complet, ou le code d'extension", () => {
+    assert.equal(scoreItem(makeItem({ title: "Charmander 004/018 McDonald's" }), SALAMECHE_MCDO_JA).match.number, true);
+    assert.equal(scoreItem(makeItem({ title: "Pikachu (SV-P 001) promo" }), PIKACHU_JA).match.number, true);
+  });
+
+  it("laisse le numéro nu aux françaises, comme avant", () => {
+    assert.equal(score("Dracaufeu n°4 Set de Base").number, true);
   });
 });

@@ -417,7 +417,13 @@ export function scoreItem<T extends Scorable>(item: T, card: CardDetail): Scored
             "i",
           )
         : null,
-      new RegExp(`(?:^|[\\s(\\[#])n?[°o]?\\s*${local}(?:$|[\\s)\\]/,.-])`, "i"),
+      // Le numéro nu — « n°4 », « #4 » — ne vaut que pour une française. Sur
+      // une japonaise, chaque extension a sa 007 : « 1998 Pokemon 007 Squirtle
+      // Vending » n'est pas la McDo 007/018, et le vendeur qui la vend écrit
+      // le total, ou le code de l'extension.
+      japanese
+        ? null
+        : new RegExp(`(?:^|[\\s(\\[#])n?[°o]?\\s*${local}(?:$|[\\s)\\]/,.-])`, "i"),
       // Les promos japonaises n'ont pas de total : le code de l'extension le
       // remplace, avant ou après le numéro — « 001/SV-P », « (SV-P 001) ».
       ...codes.flatMap((code) => [
@@ -464,11 +470,13 @@ export function scoreItem<T extends Scorable>(item: T, card: CardDetail): Scored
    * « Ectoplasma 94/165 » quand on cherche la 94/102. C'est une vraie carte, du
    * bon Pokémon, mais pas celle-ci — le `165` le dit explicitement.
    *
-   * On ne l'écarte pas : tomber sur une autre impression de son Pokémon est un
-   * hasard qui vaut d'être vu, et c'est à quoi sert un fil. On lui retire en
-   * revanche son écart à la cote, qui serait celui d'une autre carte. Même
-   * traitement que l'enchère eBay en cours, et pour la même raison : mieux vaut
-   * un écart vide qu'un écart faux, et le lecteur juge.
+   * Elle perd son numéro, donc son rang de forte : elle reste visible en
+   * élargissant, sans écart à la cote, et n'alerte jamais. Avant, elle gardait
+   * ses points et perdait seulement l'écart — « tomber sur une autre impression
+   * vaut d'être vu ». Mesuré le 3 septembre 2026 sur la Carapuce McDonald's
+   * 007/018 : vingt-sept annonces fortes sur trente-deux étaient des 007/165
+   * du 151, à deux euros, et chacune aurait déclenché une alerte. Le
+   * dénominateur dit la carte aussi sûrement que le nom.
    */
   // Les deux décomptes que publie TCGdex : « 102 » pour les cartes numérotées de
   // la série, « 103 » en comptant les secrètes. Les vendeurs emploient l'un ou
@@ -486,6 +494,7 @@ export function scoreItem<T extends Scorable>(item: T, card: CardDetail): Scored
     const printed = new RegExp(String.raw`\b${local}\s*[/\s-]\s*(\d+)\b`).exec(title);
     if (printed && !counts.includes(Number(printed[1]))) otherPrint = true;
   }
+  if (otherPrint) number = false;
 
   let score = 0;
   if (name) score += 4;

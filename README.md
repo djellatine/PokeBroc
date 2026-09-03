@@ -84,11 +84,17 @@ D'où deux vocabulaires éliminatoires, sur le modèle des reproductions :
 de ce genre affichaient jusqu'à −85 % de la cote d'une carte qu'elles ne vendaient pas. La règle du
 numéro acceptait le numéro **nu** et ne regardait jamais ce qui le suivait.
 
-Elles ne sont pas écartées pour autant : tomber sur une autre impression de son Pokémon est un
-hasard qui vaut d'être vu, et c'est à quoi sert un fil. Elles **perdent leur écart à la cote**, qui
-serait celui d'une autre carte — exactement le traitement que `feed.ts` réserve déjà à une enchère
-eBay en cours, et pour la même raison : mieux vaut un écart vide qu'un écart faux, et le lecteur
-juge. N'ayant plus d'écart, elles cessent mécaniquement de coiffer le classement.
+Elles **perdent leur numéro, donc leur rang de forte** : visibles en élargissant, sans écart à la
+cote — qui serait celui d'une autre carte — et jamais annoncées. La première version les gardait
+fortes et ne leur retirait que l'écart, au motif qu'une autre impression de son Pokémon vaut d'être
+vue. La Carapuce McDonald's de 2002 a tranché le 3 septembre 2026 : sur « Squirtle 007 », vingt-sept
+annonces fortes sur trente-deux étaient des 007/165 du 151, à deux euros, et chacune aurait déclenché
+une alerte. Le dénominateur dit la carte aussi sûrement que le nom.
+
+Sur une carte japonaise, le **numéro nu ne suffit pas non plus** : chaque extension a sa 007, et
+« 1998 Pokemon 007 Squirtle Vending » n'est pas la McDo. Le numéro n'y compte qu'avec son total
+(« 007/018 ») ou le code de l'extension (« SV-P 001 »). Les françaises gardent « n°4 » et « #4 »,
+mesurés utiles dès l'origine.
 
 Les **deux** décomptes de TCGdex sont acceptés — `official` et `total`, soit « 102 » et « 103 » pour
 une extension à cartes secrètes. Les vendeurs emploient l'un ou l'autre, et n'en retenir qu'un aurait
