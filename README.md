@@ -274,10 +274,15 @@ marché. TCGdex les connaît, dans une base séparée : 184 extensions et la cot
 aussi du japonais. Ce qu'il n'a pas, c'est le nom français — la base japonaise ne parle que
 katakanas, sans numéro de Pokédex — ni, le plus souvent, le visuel : 3 882 cartes sur 12 781 en
 ont un (mesuré le 3 septembre 2026), et aucune promo SV-P ou M-P, précisément celles qu'on suit.
-Pour le visuel, TCGdex donne l'identifiant TCGplayer de chaque tirage, et TCGplayer sert l'image
-par cet identifiant seul : `getCard` le range dans `image` sous la forme `tcgplayer:587758`, que
-seule `cardImage` sait lire, et le cache local relaie les deux CDN de TCGplayer comme il relaie
-TCGdex.
+Pour le visuel, deux replis, dans cet ordre. TCGdex donne l'identifiant TCGplayer de chaque
+tirage, et TCGplayer sert l'image par cet identifiant seul : `getCard` le range dans `image` sous
+la forme `tcgplayer:587758`, que seule `cardImage` sait lire. Mais TCGplayer n'a ni les anciennes
+séries ni les promos toutes neuves — sur dix Carapuce, cinq restaient sans visuel. Cardmarket, lui,
+vend tout, et sert l'image par identifiant produit sous le code de l'extension
+(`cardmarket:sm9b/558126`), à deux conditions mesurées le 3 septembre 2026 : un `Referer` de chez
+lui, sans quoi 403, et la bonne casse du code — « SV-P » et « M-P » tels quels, « sm9b » ou
+« sm12a » en minuscules. `cardmarketImage` sonde les trois graphies en `HEAD` une fois par
+extension et par processus. Le cache local relaie ces trois CDN comme il relaie TCGdex.
 
 Une carte japonaise porte donc un identifiant préfixé, `ja:SV-P-001`, qui suit la carte partout —
 favoris, instantanés, adresses de page — et dit à `getCard` quelle base lire. Le préfixe évite au
@@ -537,8 +542,9 @@ pour un fichier de 18 Ko**, des `502` par salves, et des requêtes qui n'aboutis
 
 1. **Cache disque** (`lib/image-cache.ts` + `/api/carte-image`) — le visuel est téléchargé une fois
    puis servi depuis `.data/img-cache`. Mesuré : 20 s à froid pour 18 images, **122 ms à chaud**.
-   Le proxy n'accepte que `assets.tcgdex.net` et les deux CDN de TCGplayer (visuels des cartes
-   japonaises absentes de TCGdex), sinon il servirait de relais vers n'importe quelle adresse.
+   Le proxy n'accepte que `assets.tcgdex.net`, les deux CDN de TCGplayer et celui de Cardmarket
+   (visuels des cartes japonaises absentes de TCGdex), sinon il servirait de relais vers n'importe
+   quelle adresse.
 2. **Réponse à budget** — le navigateur n'attend jamais plus de 3 s. Au-delà il reçoit un échec, mais
    le téléchargement continue en arrière-plan et remplit le cache ; la vignette réessaie et l'image
    finit par apparaître. Sans ce garde-fou, dix-huit requêtes bloquées épuisent les connexions du

@@ -58,6 +58,8 @@ export interface CardMarketPricing {
   "avg-holo"?: number | null;
   "low-holo"?: number | null;
   "trend-holo"?: number | null;
+  /** Identifiant produit Cardmarket, qui sert aussi à retrouver son image. */
+  idProduct?: number;
 }
 
 export interface CardDetail extends CardBrief {
@@ -83,7 +85,9 @@ export interface CardDetail extends CardBrief {
   /** Nom anglais, que certains vendeurs préfèrent : « Leafeon ex ». */
   nameEn?: string;
   /** Tirages de la carte, avec leurs identifiants chez les marchands. */
-  variants_detailed?: { thirdParty?: { tcgplayer?: number | null } | null }[];
+  variants_detailed?: {
+    thirdParty?: { tcgplayer?: number | null; cardmarket?: number | null } | null;
+  }[];
 }
 
 /**
@@ -100,6 +104,16 @@ export interface CardDetail extends CardBrief {
  */
 export const TCGPLAYER_PREFIX = "tcgplayer:";
 
+/**
+ * Second repli, derrière TCGplayer : Cardmarket. Il vend *toutes* les cartes
+ * japonaises — TCGplayer n'en a pas les anciennes séries ni les promos toutes
+ * neuves — et sert leur image par identifiant produit, sous le code de
+ * l'extension : `cardmarket:sm9b/558126`. Le code est celui de TCGdex, à la
+ * casse près, que `cardmarketImage` sonde ; l'hôte exige un `Referer`, que le
+ * cache d'images ajoute.
+ */
+export const CARDMARKET_PREFIX = "cardmarket:";
+
 /** Construit l'URL d'une image TCGdex (l'API renvoie une base sans extension). */
 export function cardImage(
   image: string | undefined,
@@ -114,16 +128,81 @@ export function cardImage(
       ? `https://tcgplayer-cdn.tcgplayer.com/product/${id}_in_1000x1000.jpg`
       : `https://product-images.tcgplayer.com/fit-in/437x437/${id}.jpg`;
   }
+  if (image.startsWith(CARDMARKET_PREFIX)) {
+    // Une seule taille chez Cardmarket, de l'ordre de 400 px.
+    const [code, id] = image.slice(CARDMARKET_PREFIX.length).split("/");
+    return `https://product-images.s3.cardmarket.com/51/${code}/${id}/${id}.jpg`;
+  }
   return `${image}/${quality}.${ext}`;
 }
 
-/** Visuel de repli d'une carte sans image TCGdex, ou `undefined`. */
-export function fallbackImage(card: Pick<CardDetail, "image" | "variants_detailed">): string | undefined {
+/** Visuel TCGdex, sinon TCGplayer ; `undefined` s'il faut aller sonder Cardmarket. */
+export function fallbackImage(
+  card: Pick<CardDetail, "image" | "variants_detailed">,
+): string | undefined {
   if (card.image) return card.image;
   const id = card.variants_detailed?.find((variant) => variant.thirdParty?.tcgplayer)?.thirdParty
     ?.tcgplayer;
   return id ? `${TCGPLAYER_PREFIX}${id}` : undefined;
 }
+
+/** Identifiant produit Cardmarket d'une carte, ou `undefined`. */
+export function cardmarketProductId(
+  card: Pick<CardDetail, "pricing" | "variants_detailed">,
+): number | undefined {
+  const fromPricing = card.pricing?.cardmarket?.idProduct;
+  if (fromPricing) return fromPricing;
+  return (
+    card.variants_detailed?.find((variant) => variant.thirdParty?.cardmarket)?.thirdParty
+      ?.cardmarket ?? undefined
+  );
+}
+
+/**
+ * Code Cardmarket d'une extension, résolu une fois par processus.
+ *
+ * Mesuré le 3 septembre 2026 : « SV-P » et « M-P » se servent tels quels,
+ * « SM9b », « SM9 » et « SM12a » seulement en minuscules. On sonde donc trois
+ * graphies en `HEAD`, dans l'ordre le plus probable, et on retient celle qui
+ * répond pour toute l'extension. Un échec est retenu dix minutes : une
+ * extension que Cardmarket ne connaît pas ne mérite pas trois requêtes à
+ * chaque passage de la veille.
+ */
+const cardmarketCodes = new Map<string, { code: string | null; at: number }>();
+const CODE_RETRY_MS = 10 * 60 * 1000;
+
+async function cardmarketImage(setId: string, idProduct: number): Promise<string | undefined> {
+  const known = cardmarketCodes.get(setId);
+  if (known && (known.code !== null || Date.now() - known.at < CODE_RETRY_MS)) {
+    return known.code ? `${CARDMARKET_PREFIX}${known.code}/${idProduct}` : undefined;
+  }
+
+  const candidates = [...new Set([setId, setId.toLowerCase(), setId.toUpperCase()])];
+  for (const code of candidates) {
+    try {
+      const res = await fetch(
+        `https://product-images.s3.cardmarket.com/51/${code}/${idProduct}/${idProduct}.jpg`,
+        {
+          method: "HEAD",
+          headers: { Referer: CARDMARKET_REFERER },
+          signal: AbortSignal.timeout(10_000),
+          cache: "no-store",
+        },
+      );
+      if (res.ok) {
+        cardmarketCodes.set(setId, { code, at: Date.now() });
+        return `${CARDMARKET_PREFIX}${code}/${idProduct}`;
+      }
+    } catch {
+      /* hôte muet : on essaie la graphie suivante */
+    }
+  }
+  cardmarketCodes.set(setId, { code: null, at: Date.now() });
+  return undefined;
+}
+
+/** Sans lui, l'hôte des images Cardmarket répond 403. */
+export const CARDMARKET_REFERER = "https://www.cardmarket.com/";
 
 /**
  * Même visuel, mais servi par notre cache local (`app/api/carte-image`).
@@ -373,7 +452,11 @@ export async function getCard(cardId: string): Promise<CardDetail | null> {
 async function japaneseCard(raw: CardDetail): Promise<CardDetail> {
   const { translateJapaneseName } = await import("./japanese");
   const { name, nameEn } = translateJapaneseName(raw.name);
-  const image = fallbackImage(raw);
+  let image = fallbackImage(raw);
+  if (!image && raw.set?.id) {
+    const idProduct = cardmarketProductId(raw);
+    if (idProduct) image = await cardmarketImage(raw.set.id, idProduct);
+  }
   return {
     ...raw,
     id: JA_PREFIX + raw.id,

@@ -10,19 +10,30 @@
 import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { CARDMARKET_REFERER } from "./tcgdex";
 
 const DIR = path.join(process.cwd(), ".data", "img-cache");
 
 /**
- * Hôtes que le proxy accepte de relayer. TCGdex, et les deux CDN de TCGplayer
- * qui servent le visuel des cartes japonaises absentes de TCGdex — voir
- * `TCGPLAYER_PREFIX` dans `lib/tcgdex.ts`.
+ * Hôtes que le proxy accepte de relayer. TCGdex, puis les CDN de TCGplayer et
+ * de Cardmarket qui servent le visuel des cartes japonaises absentes de TCGdex
+ * — voir `TCGPLAYER_PREFIX` et `CARDMARKET_PREFIX` dans `lib/tcgdex.ts`.
  */
 export const ALLOWED_HOSTS = new Set([
   "assets.tcgdex.net",
   "product-images.tcgplayer.com",
   "tcgplayer-cdn.tcgplayer.com",
+  "product-images.s3.cardmarket.com",
 ]);
+
+/** Cardmarket répond 403 à toute image demandée sans `Referer` de chez lui. */
+function requestHeaders(url: string): Record<string, string> {
+  const headers: Record<string, string> = { Accept: "image/webp,image/png,image/jpeg,image/*" };
+  if (new URL(url).hostname === "product-images.s3.cardmarket.com") {
+    headers.Referer = CARDMARKET_REFERER;
+  }
+  return headers;
+}
 
 /** TCGdex met couramment 15 à 25 s ; on lui laisse de la marge en arrière-plan. */
 const DOWNLOAD_TIMEOUT_MS = 60_000;
@@ -109,7 +120,7 @@ export function download(url: string): Promise<Buffer | null> {
     await acquire();
     try {
       const res = await fetch(url, {
-        headers: { Accept: "image/webp,image/png,image/jpeg,image/*" },
+        headers: requestHeaders(url),
         signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
         cache: "no-store",
       });

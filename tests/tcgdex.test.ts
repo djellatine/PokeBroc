@@ -7,6 +7,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   cardImage,
+  cardmarketProductId,
+  CARDMARKET_PREFIX,
   cardNumber,
   fallbackImage,
   isJapaneseId,
@@ -82,5 +84,28 @@ describe("fallbackImage", () => {
   it("ne rend rien sans image ni identifiant", () => {
     assert.equal(fallbackImage({ variants_detailed: [{ thirdParty: null }] }), undefined);
     assert.equal(fallbackImage({}), undefined);
+  });
+});
+
+describe("cardImage — repli Cardmarket", () => {
+  it("lit un code d'extension et un identifiant produit, en une seule taille", () => {
+    const url = "https://product-images.s3.cardmarket.com/51/sm9b/558126/558126.jpg";
+    assert.equal(cardImage(`${CARDMARKET_PREFIX}sm9b/558126`, "low"), url);
+    assert.equal(cardImage(`${CARDMARKET_PREFIX}sm9b/558126`, "high"), url);
+  });
+});
+
+describe("cardmarketProductId", () => {
+  it("préfère l'identifiant de la cote, puis celui des tirages", () => {
+    assert.equal(cardmarketProductId({ pricing: { cardmarket: { idProduct: 558126 } } }), 558126);
+    assert.equal(
+      cardmarketProductId({ variants_detailed: [{ thirdParty: { cardmarket: 558298 } }] }),
+      558298,
+    );
+  });
+
+  it("ne rend rien sans identifiant", () => {
+    assert.equal(cardmarketProductId({ pricing: { cardmarket: null } }), undefined);
+    assert.equal(cardmarketProductId({}), undefined);
   });
 });

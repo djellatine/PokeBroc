@@ -8,11 +8,12 @@ import { describe, it } from "node:test";
 import { safeImageUrl } from "../lib/image-cache.ts";
 
 describe("safeImageUrl", () => {
-  it("accepte TCGdex et les deux CDN de TCGplayer", () => {
+  it("accepte TCGdex, les deux CDN de TCGplayer et celui de Cardmarket", () => {
     for (const url of [
       "https://assets.tcgdex.net/fr/base/base1/4/low.webp",
       "https://product-images.tcgplayer.com/fit-in/437x437/587758.jpg",
       "https://tcgplayer-cdn.tcgplayer.com/product/587758_in_1000x1000.jpg",
+      "https://product-images.s3.cardmarket.com/51/sm9b/558126/558126.jpg",
     ]) {
       assert.equal(safeImageUrl(url)?.href, url);
     }
