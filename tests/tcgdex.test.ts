@@ -5,7 +5,14 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { cardNumber, isJapaneseId, JA_PREFIX } from "../lib/tcgdex.ts";
+import {
+  cardImage,
+  cardNumber,
+  fallbackImage,
+  isJapaneseId,
+  JA_PREFIX,
+  TCGPLAYER_PREFIX,
+} from "../lib/tcgdex.ts";
 import { DRACAUFEU, NANJAMO_JA, PHYLLALI_JA, PIKACHU_JA, SANS_COTE } from "./helpers.ts";
 
 describe("isJapaneseId", () => {
@@ -29,5 +36,51 @@ describe("cardNumber", () => {
 
   it("garde le numéro nu pour une française sans total", () => {
     assert.equal(cardNumber(SANS_COTE), "7");
+  });
+});
+
+describe("cardImage — repli TCGplayer", () => {
+  it("construit une URL TCGdex quand la base est une base TCGdex", () => {
+    assert.equal(
+      cardImage("https://assets.tcgdex.net/ja/SV/SV8a/001", "low"),
+      "https://assets.tcgdex.net/ja/SV/SV8a/001/low.webp",
+    );
+  });
+
+  it("lit un identifiant TCGplayer, en deux tailles", () => {
+    assert.equal(
+      cardImage(`${TCGPLAYER_PREFIX}587758`, "low"),
+      "https://product-images.tcgplayer.com/fit-in/437x437/587758.jpg",
+    );
+    assert.equal(
+      cardImage(`${TCGPLAYER_PREFIX}587758`, "high"),
+      "https://tcgplayer-cdn.tcgplayer.com/product/587758_in_1000x1000.jpg",
+    );
+  });
+});
+
+describe("fallbackImage", () => {
+  it("garde l'image TCGdex quand elle existe", () => {
+    assert.equal(
+      fallbackImage({
+        image: "https://assets.tcgdex.net/ja/SV/SV8a/001",
+        variants_detailed: [{ thirdParty: { tcgplayer: 1 } }],
+      }),
+      "https://assets.tcgdex.net/ja/SV/SV8a/001",
+    );
+  });
+
+  it("se rabat sur le premier tirage connu de TCGplayer", () => {
+    assert.equal(
+      fallbackImage({
+        variants_detailed: [{ thirdParty: { tcgplayer: null } }, { thirdParty: { tcgplayer: 587758 } }],
+      }),
+      `${TCGPLAYER_PREFIX}587758`,
+    );
+  });
+
+  it("ne rend rien sans image ni identifiant", () => {
+    assert.equal(fallbackImage({ variants_detailed: [{ thirdParty: null }] }), undefined);
+    assert.equal(fallbackImage({}), undefined);
   });
 });

@@ -68,7 +68,11 @@ export async function GET(request: NextRequest) {
 
   return new Response(new Uint8Array(body), {
     headers: {
-      "Content-Type": url.pathname.endsWith(".png") ? "image/png" : "image/webp",
+      "Content-Type": url.pathname.endsWith(".png")
+        ? "image/png"
+        : url.pathname.endsWith(".jpg")
+          ? "image/jpeg"
+          : "image/webp",
       "Content-Length": String(body.byteLength),
       // Une URL TCGdex désigne toujours le même visuel : on peut la garder longtemps.
       "Cache-Control": "public, max-age=31536000, immutable",

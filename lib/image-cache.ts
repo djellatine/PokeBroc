@@ -13,7 +13,16 @@ import path from "node:path";
 
 const DIR = path.join(process.cwd(), ".data", "img-cache");
 
-export const ALLOWED_HOST = "assets.tcgdex.net";
+/**
+ * Hôtes que le proxy accepte de relayer. TCGdex, et les deux CDN de TCGplayer
+ * qui servent le visuel des cartes japonaises absentes de TCGdex — voir
+ * `TCGPLAYER_PREFIX` dans `lib/tcgdex.ts`.
+ */
+export const ALLOWED_HOSTS = new Set([
+  "assets.tcgdex.net",
+  "product-images.tcgplayer.com",
+  "tcgplayer-cdn.tcgplayer.com",
+]);
 
 /** TCGdex met couramment 15 à 25 s ; on lui laisse de la marge en arrière-plan. */
 const DOWNLOAD_TIMEOUT_MS = 60_000;
@@ -68,11 +77,11 @@ function cacheFile(url: string): string {
   return path.join(DIR, `${createHash("sha256").update(url).digest("hex")}.bin`);
 }
 
-/** URL TCGdex acceptable, ou `null`. Empêche d'utiliser le proxy comme relais. */
+/** URL d'un hôte admis, ou `null`. Empêche d'utiliser le proxy comme relais. */
 export function safeImageUrl(raw: string): URL | null {
   try {
     const url = new URL(raw);
-    return url.protocol === "https:" && url.hostname === ALLOWED_HOST ? url : null;
+    return url.protocol === "https:" && ALLOWED_HOSTS.has(url.hostname) ? url : null;
   } catch {
     return null;
   }
@@ -100,7 +109,7 @@ export function download(url: string): Promise<Buffer | null> {
     await acquire();
     try {
       const res = await fetch(url, {
-        headers: { Accept: "image/webp,image/png,image/*" },
+        headers: { Accept: "image/webp,image/png,image/jpeg,image/*" },
         signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
         cache: "no-store",
       });

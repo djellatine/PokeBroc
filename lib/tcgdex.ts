@@ -82,7 +82,23 @@ export interface CardDetail extends CardBrief {
   nameJa?: string;
   /** Nom anglais, que certains vendeurs préfèrent : « Leafeon ex ». */
   nameEn?: string;
+  /** Tirages de la carte, avec leurs identifiants chez les marchands. */
+  variants_detailed?: { thirdParty?: { tcgplayer?: number | null } | null }[];
 }
+
+/**
+ * Base d'image de repli : un identifiant produit TCGplayer, à la place d'une
+ * base d'URL TCGdex.
+ *
+ * TCGdex n'a le visuel que de 30 % des cartes japonaises (3 882 sur 12 781,
+ * mesuré le 3 septembre 2026), et d'aucune promo SV-P ou M-P — précisément
+ * celles qu'on suit. Il publie en revanche l'identifiant TCGplayer de chaque
+ * tirage, et TCGplayer, qui vend ces cartes, sert leur image par cet
+ * identifiant seul. Le champ `image` garde une chaîne pour que favoris,
+ * instantanés et embeds Discord n'aient rien à savoir : seule `cardImage`
+ * lit le préfixe.
+ */
+export const TCGPLAYER_PREFIX = "tcgplayer:";
 
 /** Construit l'URL d'une image TCGdex (l'API renvoie une base sans extension). */
 export function cardImage(
@@ -91,7 +107,22 @@ export function cardImage(
   ext: "webp" | "png" = "webp",
 ): string | null {
   if (!image) return null;
+  if (image.startsWith(TCGPLAYER_PREFIX)) {
+    const id = image.slice(TCGPLAYER_PREFIX.length);
+    // 437 px suffit à une vignette ; la fiche carte prend le grand format.
+    return quality === "high"
+      ? `https://tcgplayer-cdn.tcgplayer.com/product/${id}_in_1000x1000.jpg`
+      : `https://product-images.tcgplayer.com/fit-in/437x437/${id}.jpg`;
+  }
   return `${image}/${quality}.${ext}`;
+}
+
+/** Visuel de repli d'une carte sans image TCGdex, ou `undefined`. */
+export function fallbackImage(card: Pick<CardDetail, "image" | "variants_detailed">): string | undefined {
+  if (card.image) return card.image;
+  const id = card.variants_detailed?.find((variant) => variant.thirdParty?.tcgplayer)?.thirdParty
+    ?.tcgplayer;
+  return id ? `${TCGPLAYER_PREFIX}${id}` : undefined;
 }
 
 /**
@@ -342,12 +373,14 @@ export async function getCard(cardId: string): Promise<CardDetail | null> {
 async function japaneseCard(raw: CardDetail): Promise<CardDetail> {
   const { translateJapaneseName } = await import("./japanese");
   const { name, nameEn } = translateJapaneseName(raw.name);
+  const image = fallbackImage(raw);
   return {
     ...raw,
     id: JA_PREFIX + raw.id,
     lang: "ja",
     name,
     nameJa: raw.name,
+    ...(image ? { image } : {}),
     ...(nameEn ? { nameEn } : {}),
     ...(raw.set ? { set: { ...raw.set, name: japaneseSetName(raw.set.id, raw.set.name) } } : {}),
   };
@@ -364,8 +397,9 @@ async function japaneseCard(raw: CardDetail): Promise<CardDetail> {
  * Résolu à la demande, uniquement pour les cartes concernées : le faire dans la
  * recherche ajouterait un aller-retour par carte sans visuel à chaque frappe.
  *
- * Pas de repli pour une carte japonaise : elle n'a d'équivalent dans aucune
- * autre base, c'est précisément pour cela qu'on la suit.
+ * Pas de repli anglais pour une carte japonaise : elle n'a d'équivalent dans
+ * aucune autre base, c'est précisément pour cela qu'on la suit. Son repli à
+ * elle est TCGplayer, déjà résolu par `getCard` — voir `TCGPLAYER_PREFIX`.
  */
 export async function resolveCardImage(
   cardId: string,
