@@ -107,6 +107,53 @@ paramètres. Un témoin est resté en place pour le jour où ça changerait :
 boot réussi — si `cat ~/boot-temoin.txt` affiche une date récente après un
 redémarrage, l'automatique est revenu.
 
+### Android tue les processus au-delà de 32 : réglé par ADB
+
+Android 12 limite à 32 les processus « fantômes » d'une application, Termux
+compris — et en tue au hasard au-delà. Le 3 septembre 2026, le Chromium du
+collecteur Cardmarket (quatorze processus) a fait franchir la barre : Android a
+tué `sshd` et le navigateur. Le remède, une fois pour toutes, depuis le PC, la
+tablette branchée en USB avec le débogage USB activé (options pour les
+développeurs ; la surcouche Blackview n'a pas l'appairage sans fil) :
+
+```sh
+adb shell "/system/bin/device_config set_sync_disabled_for_tests persistent"
+adb shell "/system/bin/device_config put activity_manager max_phantom_processes 2147483647"
+adb shell "settings put global settings_enable_monitor_phantom_procs false"
+```
+
+Fait ce jour-là ; vérifié en faisant tourner 36 processus sans perte. À refaire
+si un jour la tablette est réinitialisée. `adb` vient de `winget install
+Google.PlatformTools`.
+
+### Lever le défi Cloudflare de Cardmarket à distance
+
+Le collecteur Cardmarket lance un Chromium fenêtré sur l'écran virtuel `:9`
+(Xvfb). Cloudflare exige, à l'amorçage puis quand le laissez-passer expire, de
+cocher une case dans cette fenêtre. Personne ne voit `:9` — sauf par VNC :
+
+1. Sur la tablette (par SSH), un serveur VNC sur l'écran virtuel, le temps de
+   l'opération, puis le collecteur en mode visible, tous deux détachés depuis
+   Termux (un processus lancé dans le Debian meurt avec la session SSH) :
+   ```sh
+   setsid nohup proot-distro login debian -- x11vnc -display :9 -forever -shared -nopw -rfbport 5900 -listen 0.0.0.0 -o /root/x11vnc.log >/dev/null 2>&1 </dev/null &
+   setsid nohup proot-distro login debian -- bash -c "cd /root/PokeBroc && rm -f .data/cardmarket/collect.lock && DISPLAY=:9 /root/venv/bin/python collect/cardmarket.py --visible --resolve" > ~/cardmarket-visible.log 2>&1 </dev/null &
+   ```
+2. Sur le PC, `deploy/tablette/ecran.py` (`pip install vncdotool`) : `capture`
+   pour voir la page, `click X Y` pour cocher la case « Vérifiez que vous êtes
+   humain » (mesurée en 213,480 avec la fenêtre en haut à gauche). Le collecteur
+   attend deux minutes par page ; une case cochée vaut pour les suivantes.
+3. Quand le journal du collecteur montre des offres, tuer `x11vnc`
+   (`pkill -f x11vnc` **dans le Debian**, jamais depuis la ligne SSH elle-même,
+   dont la commande contient le mot et se tuerait).
+
+Pièges rencontrés : la fenêtre s'ouvrait hors de l'écran (position retenue des
+passages invisibles — corrigé dans `cardmarket.py`, `--window-position=0,0`
+en mode visible) ; TightVNC Viewer sur le PC affichait du noir là où
+`ecran.py` voyait la page — préférer `ecran.py` ; `x11-utils`, `x11-apps` et
+`xdotool` sont installés dans le Debian pour inspecter et déplacer les fenêtres
+(`DISPLAY=:9 xwininfo -root -tree`, `xdotool windowmove`).
+
 ## Mettre à jour le site après des modifs
 
 Depuis le 3 septembre 2026, **la tablette se met à jour toute seule**. Le

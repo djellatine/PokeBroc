@@ -343,6 +343,13 @@ class Browser:
             # Hors du bureau visible, sans être headless : le compromis
             # « invisible mais crédible » face à Cloudflare.
             args.append("--window-position=-2400,-2400")
+        elif visible:
+            # Chromium retient la position de sa fenêtre dans le profil : après
+            # des passages invisibles, l'amorçage rouvrait la fenêtre là où il
+            # l'avait laissée, hors de l'écran — mesuré sur la tablette le
+            # 3 septembre 2026, trente pixels visibles sur mille deux cents, et
+            # un écran VNC noir. On la ramène au coin en haut à gauche.
+            args.append("--window-position=0,0")
         # Sous proot (la tablette), le processus se croit root et le bac à
         # sable de Chromium ne peut pas s'établir : sans ce drapeau, le
         # navigateur refuse même de démarrer. `geteuid` n'existe pas sous

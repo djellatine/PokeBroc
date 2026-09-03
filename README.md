@@ -1254,6 +1254,7 @@ deploy/
     lancer.sh               les unités rejouées sans systemd — site, collecte, mise à jour, sauvegarde
     boot.sh                 démarrage automatique via Termux:Boot
     LISEZMOI.md             dossier de bord du serveur tablette — chemins, pannes, remèdes
+    ecran.py                voir et cliquer sur l'écran virtuel de la tablette, par VNC (défi Cloudflare)
 tests/                      node:test — match, japanese, bulbapedia, tcgdex, ebay, rate-limit, sightings,
                             format, alertes, store
                             collect/test_lbc.py — normalisation et rotation, sans réseau

@@ -102,10 +102,24 @@ tablette se met à jour toute seule dès qu'on pousse sur `main`.
 | `98efc80` | tsconfig.json remis d'équerre après un build dans `.next-nouveau` |
 | `05328e1` | identifiant Bulbapedia plus coupé sur sa barre (recherche, tableau de bord) |
 
+### Tablette — Cardmarket, enfin
+
+- Le collecteur Cardmarket n'avait **jamais** réussi un passage sur la tablette
+  (« 5 ennuis » à chaque quart d'heure depuis le 1er septembre) : le défi
+  Cloudflare, à lever dans une fenêtre que personne ne voyait.
+- En chemin, **Android 12 tuait les processus** de Termux au-delà de 32 :
+  `sshd` et le Chromium y sont passés. Réglé par ADB, en USB (voir LISEZMOI).
+- Le défi a été levé **depuis le PC**, par VNC sur l'écran virtuel de la
+  tablette : `deploy/tablette/ecran.py` capture l'écran et clique. La fenêtre du
+  navigateur s'ouvrait hors écran (position retenue des passages invisibles) :
+  corrigé dans `cardmarket.py`. Une fois la case cochée, les pages Cardmarket
+  se chargent sans défi et le collecteur relève les offres.
+
 ### Reste à faire, ou à surveiller
 
-- **Collecteur Cardmarket sur la tablette** : échoue à chaque passage (« 5
-  ennuis », défi Cloudflare). À reprendre avec Termux:X11, voir LISEZMOI.
+- **Collecteur Cardmarket sur la tablette** : amorcé le 3 septembre au soir ;
+  surveiller `collect.log` — si les « ennuis » reviennent, le laissez-passer a
+  expiré, refaire la procédure VNC du LISEZMOI (dix minutes).
 - **Cote des cartes Bulbapedia** : Cardmarket vend tout, mais derrière
   Cloudflare — passerait par le navigateur piloté, comme les offres.
 - **Veille en 227 s** au premier passage : à observer, le garde-fou est à
