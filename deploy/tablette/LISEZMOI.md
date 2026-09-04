@@ -155,9 +155,17 @@ cocher une case dans cette fenêtre. Personne ne voit `:9` — sauf par VNC :
    pour voir la page, `click X Y` pour cocher la case « Vérifiez que vous êtes
    humain » (mesurée en 213,480 avec la fenêtre en haut à gauche). Le collecteur
    attend deux minutes par page ; une case cochée vaut pour les suivantes.
-3. Quand le journal du collecteur montre des offres, tuer `x11vnc`
-   (`pkill -f x11vnc` **dans le Debian**, jamais depuis la ligne SSH elle-même,
-   dont la commande contient le mot et se tuerait).
+3. Quand le journal du collecteur montre des offres, tuer `x11vnc` par son
+   nom exact, **dans le Debian** : `pkill -x x11vnc`. Pas `pkill -f` : la
+   commande SSH ou le `bash -c` qui le lance contient le mot et se tuerait
+   lui-même (payé le 4 septembre 2026, connexion coupée avec un signal 15).
+
+Le laissez-passer ainsi obtenu **dure un peu plus de deux heures** : le
+4 septembre 2026, amorcé à 22h55, les passages invisibles ont réussi de 23h01
+à 01h02 puis le défi est revenu à 01h16, et il a fallu recommencer à 15h. Tant
+qu'aucun passage invisible ne sait le renouveler, la procédure est à refaire
+à chaque retour des « 5 ennuis » — le drapeau `challenged` de
+`.data/cardmarket/status.json` le dit sans ouvrir le journal.
 
 Pièges rencontrés : la fenêtre s'ouvrait hors de l'écran (position retenue des
 passages invisibles — corrigé dans `cardmarket.py`, `--window-position=0,0`

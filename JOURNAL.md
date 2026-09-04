@@ -130,7 +130,10 @@ serveur local du PC — trois cartes japonaises épinglées sur le PC ce soir on
 
 - **Collecteur Cardmarket sur la tablette** : amorcé le 3 septembre au soir ;
   surveiller `collect.log` — si les « ennuis » reviennent, le laissez-passer a
-  expiré, refaire la procédure VNC du LISEZMOI (dix minutes).
+  expiré, refaire la procédure VNC du LISEZMOI (dix minutes). Mesuré le
+  4 septembre : il tient un peu plus de deux heures (23h01 → 01h02), puis
+  chaque quart d'heure échoue jusqu'au prochain amorçage à la main. Le vrai
+  chantier est là : renouveler le laissez-passer sans personne devant l'écran.
 - **Cote des cartes Bulbapedia** : Cardmarket vend tout, mais derrière
   Cloudflare — passerait par le navigateur piloté, comme les offres.
 - **Veille en 227 s** au premier passage : à observer, le garde-fou est à
