@@ -1118,7 +1118,12 @@ avec `--no-sandbox`, et `lbc.py --dry-run` ramène ses annonces sans un 403.
 proot n'a pas de systemd : `deploy/tablette/lancer.sh` rejoue les unités en un seul superviseur —
 site relancé s'il tombe, veille puis leboncoin enchaînés à chaque quart d'heure (l'enchaînement
 remplace le décalage de cinq minutes des minuteries), sauvegarde quotidienne vers 4 h dans
-`/root/sauvegardes`, quatorze conservées, journaux dans `/root/journal`. Il exporte ce que le
+`/root/sauvegardes`, quatorze conservées, journaux dans `/root/journal`. Ces archives vivent sur
+la tablette elle-même — une tablette morte ou réinitialisée les emporte —, d'où
+`deploy/tablette/sauvegarde-pc.ps1` : une tâche planifiée Windows (« PokeBroc-Sauvegarde », 9 h et
+chaque ouverture de session, rattrapée si le PC dormait) rapatrie la dernière archive par SSH sur
+le PC, la vérifie avec `tar`, la range dans `~/PokeBroc-sauvegardes` et en garde trente. Quelque
+350 Ko par jour ; rien n'est recopié s'il l'est déjà. Il exporte ce que le
 `.env.local` copié du PC dit en chemins Windows (`LBC_PYTHON`, `CARDMARKET_PYTHON`), pose
 `SESSION_HTTP=1` (voir plus haut : servi en HTTP local ou Tailscale, pas de HTTPS) et démarre un
 Xvfb pour la fenêtre hors écran de Cardmarket. `deploy/tablette/boot.sh`, copié dans
@@ -1313,6 +1318,7 @@ deploy/
     boot.sh                 démarrage automatique via Termux:Boot
     LISEZMOI.md             dossier de bord du serveur tablette — chemins, pannes, remèdes
     ecran.py                voir et cliquer sur l'écran virtuel de la tablette, par VNC (défi Cloudflare)
+    sauvegarde-pc.ps1       rapatrie sur le PC la dernière archive de la tablette (tâche planifiée)
 tests/                      node:test — match, japanese, bulbapedia, tcgdex, cardmarket, ebay, rate-limit,
                             sightings, format, alertes, store
                             collect/test_lbc.py — normalisation et rotation, sans réseau

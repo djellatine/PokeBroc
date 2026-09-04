@@ -39,7 +39,23 @@ case — plus d'amorçage à la main par VNC.
 - Dossier de bord : la commande d'arrêt de `x11vnc` tuait sa propre session
   (`pkill -f` sur un mot présent dans la ligne de commande) — `pkill -x`.
 
+### Une copie des sauvegardes hors de la tablette
+
+Les archives quotidiennes vivaient sur la tablette seule. Le PC les rapatrie
+désormais : `deploy/tablette/sauvegarde-pc.ps1`, tâche planifiée
+« PokeBroc-Sauvegarde » à 9 h et à chaque ouverture de session, dernière
+archive copiée par SSH sous un nom temporaire, vérifiée par `tar`, trente
+conservées dans `~/PokeBroc-sauvegardes`. Vérifié le soir même : première
+copie de 346 Ko, puis « déjà là » au second passage. Deux pièges Windows :
+le `tar` de Git cherche un `gzip` absent (celui de System32 lit le gzip
+seul), et sous PowerShell 5.1 la moindre ligne d'erreur d'un programme natif
+devient une exception si `$ErrorActionPreference` vaut `Stop`.
+
 ### Reste à faire, ou à surveiller
+
+- **Un signal de vie** de la tablette (battement de cœur vers un service
+  externe, alerte Discord après une heure de silence) : demande un compte
+  chez un service comme healthchecks.io, à créer par l'utilisateur.
 
 - **Surveiller les « défi(s) levé(s) »** dans `collect.log` sur quelques
   jours : un défi levé toutes les huit ou neuf passages est la normale. Si

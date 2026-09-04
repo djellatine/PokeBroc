@@ -47,7 +47,18 @@ d'heure, sauvegarde vers 4 h du matin, un Xvfb pour Cardmarket, et un verrou
 
 - Journaux : `/root/journal` — `site.log`, `lanceur.log`, `collecte-AAAA-MM-JJ.log`
   (un par jour, purgés après 14 jours).
-- Sauvegardes : `/root/sauvegardes`, quatorze `data-*.tar.gz` glissants.
+- Sauvegardes : `/root/sauvegardes`, quatorze `data-*.tar.gz` glissants
+  (350 Ko pièce : `img-cache/` et le profil Chromium sont exclus). **Une copie
+  quitte la tablette chaque jour** : depuis le 4 septembre 2026, la tâche
+  planifiée Windows « PokeBroc-Sauvegarde » du PC (`sauvegarde-pc.ps1` dans
+  ce dossier) va chercher la dernière archive par SSH, à 9 h et à chaque
+  ouverture de session, et la range dans `~/PokeBroc-sauvegardes` (trente
+  conservées, journal `journal.log` à côté). Si le PC dormait à 9 h, elle
+  rattrape au réveil ; si la tablette est injoignable, elle note l'échec et
+  réessaie à la prochaine occasion. Réinstaller la tâche après une
+  réinstallation du PC : `powershell -File deploy\tablette\sauvegarde-pc.ps1 -Installer`.
+  Le chemin des archives vu de Termux, sans entrer dans le Debian :
+  `…/proot-distro/containers/debian/rootfs/root/sauvegardes`.
 - `SESSION_HTTP=1` (posé par le lanceur) : cookie de session sans `secure`,
   sinon impossible de se connecter en HTTP depuis le téléphone.
 
