@@ -138,11 +138,32 @@ Fait ce jour-là ; vérifié en faisant tourner 36 processus sans perte. À refa
 si un jour la tablette est réinitialisée. `adb` vient de `winget install
 Google.PlatformTools`.
 
-### Lever le défi Cloudflare de Cardmarket à distance
+### Le défi Cloudflare de Cardmarket se lève tout seul
 
-Le collecteur Cardmarket lance un Chromium fenêtré sur l'écran virtuel `:9`
-(Xvfb). Cloudflare exige, à l'amorçage puis quand le laissez-passer expire, de
-cocher une case dans cette fenêtre. Personne ne voit `:9` — sauf par VNC :
+Depuis le 4 septembre 2026, le collecteur coche lui-même la case Cloudflare :
+sur la tablette il trouve un serveur X (`DISPLAY=:9`, posé par le lanceur) et
+`xdotool`, ouvre sa fenêtre sur l'écran virtuel et, devant un défi, clique la
+case par XTEST — le même événement que la main par VNC. Le journal du
+collecteur (`.data/cardmarket/collect.log`) le dit : « défi : case cochée en
+212,480 (essai 1) », et le résumé du passage porte « 1 défi(s) levé(s) ».
+Le laissez-passer dure un peu plus de deux heures, donc on doit voir un défi
+levé toutes les huit ou neuf passages, sans rien faire. **`xdotool` est
+indispensable** (`apt install xdotool` dans le Debian) : sans lui, retour au
+mode d'avant, fenêtre hors écran et défi jamais levé.
+
+Pour tester sans attendre l'expiration : effacer le cookie du profil, le
+navigateur fermé (entre deux passages), puis lancer un passage —
+
+```sh
+/root/venv/bin/python -c "import sqlite3; c=sqlite3.connect('/root/PokeBroc/.data/cardmarket/profil/Default/Network/Cookies'); print(c.execute(\"delete from cookies where name='cf_clearance'\").rowcount); c.commit()"
+cd /root/PokeBroc && DISPLAY=:9 /root/venv/bin/python collect/cardmarket.py
+```
+
+### Lever le défi à la main, si l'automatique n'y arrive plus
+
+Si Cloudflare remplace un jour la case par un vrai puzzle, le collecteur
+retombe sur « défi Cloudflare » à chaque carte et `status.json` porte
+`challenged: true`. Personne ne voit `:9` — sauf par VNC :
 
 1. Sur la tablette (par SSH), un serveur VNC sur l'écran virtuel, le temps de
    l'opération, puis le collecteur en mode visible, tous deux détachés depuis
@@ -162,10 +183,8 @@ cocher une case dans cette fenêtre. Personne ne voit `:9` — sauf par VNC :
 
 Le laissez-passer ainsi obtenu **dure un peu plus de deux heures** : le
 4 septembre 2026, amorcé à 22h55, les passages invisibles ont réussi de 23h01
-à 01h02 puis le défi est revenu à 01h16, et il a fallu recommencer à 15h. Tant
-qu'aucun passage invisible ne sait le renouveler, la procédure est à refaire
-à chaque retour des « 5 ennuis » — le drapeau `challenged` de
-`.data/cardmarket/status.json` le dit sans ouvrir le journal.
+à 01h02 puis le défi est revenu à 01h16, et il a fallu recommencer à 15h.
+C'est ce qui a conduit au clic automatique du même jour (section précédente).
 
 Pièges rencontrés : la fenêtre s'ouvrait hors de l'écran (position retenue des
 passages invisibles — corrigé dans `cardmarket.py`, `--window-position=0,0`

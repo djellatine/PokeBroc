@@ -683,8 +683,29 @@ quelques requêtes puis 403 : le cookie est lié à l'empreinte TLS **d'Edge**, 
 qu'il imite. Seul un vrai navigateur passe de façon stable. `collect/cardmarket.py` **lance donc son
 propre Edge** (Playwright, profil persistant `.data/cardmarket/profil` qui garde le `cf_clearance`),
 fenêtre **hors écran** par défaut — invisible, mais bien meilleur que *headless* face à Cloudflare —
-et `--visible` quand un défi doit être levé à la main. Aucun script ne coche un CAPTCHA : au premier
-usage ou après un durcissement, `python collect/cardmarket.py --visible --resolve` une fois.
+et `--visible` quand un défi doit être levé à la main. Sur un bureau Windows, personne ne coche la
+case à la place de l'utilisateur : au premier usage ou après un durcissement,
+`python collect/cardmarket.py --visible --resolve` une fois.
+
+**Sur la tablette, la case se coche toute seule.** Mesuré le 4 septembre 2026 : le laissez-passer
+que Cardmarket accorde dure un peu plus de deux heures (passages réussis de 23h01 à 01h02, défi de
+retour à 01h16), puis chaque quart d'heure échouait jusqu'à un amorçage à la main par VNC — huit
+heures de trou dans la nuit, autant dans la journée. Or ce qui a levé le défi par VNC n'est pas un
+clic de Playwright (reconnu et refusé) mais un événement XTEST envoyé au serveur X ; `xdotool`
+envoie exactement le même. Là où un serveur X et `xdotool` existent, le collecteur ouvre donc sa
+fenêtre sur l'écran virtuel (que personne ne regarde) et, devant un défi, clique la case lui-même.
+Reste à savoir *où* : Turnstile se rend dans un shadow DOM fermé, ni l'`iframe` ni la case ne
+répondent à un sélecteur. Mais Playwright connaît le cadre par le protocole, pas par le DOM, et sait
+retrouver l'élément qui l'héberge : sa boîte (300 × 65 px) est la seule prise, la case est à 21 px
+du bord gauche, à mi-hauteur. Conversion en coordonnées d'écran par `outerHeight − innerHeight`
+(la hauteur des barres du navigateur), ce qui impose de **ne pas émuler le viewport** en mode
+visible — émulé, `innerHeight` ment. Mesuré : défi levé en un ou deux clics, cinq cartes et 98
+offres en 78 s, cookie effacé au préalable pour forcer le défi. Deux pièges payés : `xdotool
+mousemove --sync` ne rend jamais la main si le pointeur est déjà sur la case (le clic précédent
+l'y a laissé) ; et le script `challenge-platform` que Cloudflare glisse aussi dans les vraies pages
+n'est pas un marqueur de défi (une carte chargée passait pour défiée, deux minutes perdues). Si
+Cloudflare remplace un jour la case par un vrai puzzle, le collecteur retombe sur l'état d'avant —
+`challenged` dans `status.json`, procédure VNC du dossier de bord.
 
 Là où Edge n'existe pas — Linux ARM64, donc la tablette —, le collecteur se rabat sur le **Chromium
 que Playwright embarque**, quitte à lever un défi à la main un peu plus souvent, et ajoute

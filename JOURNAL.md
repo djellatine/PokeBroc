@@ -5,6 +5,47 @@ Ce qui a été fait, séance par séance, avec le *où* et le *comment* — le
 après une pause ; le dossier de bord de la tablette, lui, est dans
 `deploy/tablette/LISEZMOI.md`.
 
+## 4 septembre 2026 — Cardmarket se débrouille seul avec Cloudflare
+
+En une phrase : le laissez-passer Cloudflare de Cardmarket expire toutes les
+deux heures, et la tablette le renouvelle désormais elle-même en cochant la
+case — plus d'amorçage à la main par VNC.
+
+- **Constat du matin** : tout tournait (site, veille, leboncoin, mise à jour
+  automatique) sauf Cardmarket, « 5 ennuis » depuis 01h16. Les passages
+  réussis avaient duré de 23h01 à 01h02 : le laissez-passer tient un peu plus
+  de deux heures, puis la case revient et le mode invisible ne sait pas la
+  cocher.
+- **Clic automatique** dans `collect/cardmarket.py` : là où il y a un serveur
+  X et `xdotool` (la tablette), la fenêtre va sur l'écran virtuel et, devant
+  un défi, le collecteur clique la case par XTEST — ce que faisait la main
+  par VNC. La case vit dans un shadow DOM fermé ; c'est la boîte du cadre
+  Turnstile, retrouvée par `frame_element()`, qui donne sa position (21 px du
+  bord, mi-hauteur), convertie en coordonnées d'écran par la hauteur des
+  barres du navigateur — d'où la fin de l'émulation du viewport en mode
+  visible. Le détail et les mesures sont dans le README (« Pourquoi Cardmarket
+  passe par un navigateur piloté »).
+- **Mesuré**, cookie effacé pour forcer le défi : défi levé au deuxième clic,
+  5 cartes et 98 offres en 78 s. Puis le passage automatique suivant, sans
+  défi, 5 cartes en 114 s.
+- **Deux pièges** : `xdotool mousemove --sync` bloque si le pointeur est déjà
+  sur la case (quinze secondes de délai par essai, « clic impossible ») ; et
+  le mot « challenge-platform » n'est pas un marqueur de défi, Cloudflare le
+  met aussi dans les vraies pages — le Kyogre chargé passait pour défié. On
+  lit maintenant le champ `cf-turnstile-response` et l'objet `_cf_chl_opt`.
+- **Verrou** du collecteur porté de 5 à 15 min : un passage où chaque carte
+  est défiée peut dépasser cinq minutes, et deux navigateurs sur le même
+  profil se refusent.
+- Dossier de bord : la commande d'arrêt de `x11vnc` tuait sa propre session
+  (`pkill -f` sur un mot présent dans la ligne de commande) — `pkill -x`.
+
+### Reste à faire, ou à surveiller
+
+- **Surveiller les « défi(s) levé(s) »** dans `collect.log` sur quelques
+  jours : un défi levé toutes les huit ou neuf passages est la normale. Si
+  Cloudflare passe à un vrai puzzle, `status.json` repasse à
+  `challenged: true` et la procédure VNC du LISEZMOI reste le repli.
+
 ## 3 septembre 2026 — cartes japonaises, alertes perdues, tablette autonome
 
 En une phrase : le site suit désormais les cartes japonaises (promos McDo
@@ -129,11 +170,8 @@ serveur local du PC — trois cartes japonaises épinglées sur le PC ce soir on
 ### Reste à faire, ou à surveiller
 
 - **Collecteur Cardmarket sur la tablette** : amorcé le 3 septembre au soir ;
-  surveiller `collect.log` — si les « ennuis » reviennent, le laissez-passer a
-  expiré, refaire la procédure VNC du LISEZMOI (dix minutes). Mesuré le
-  4 septembre : il tient un peu plus de deux heures (23h01 → 01h02), puis
-  chaque quart d'heure échoue jusqu'au prochain amorçage à la main. Le vrai
-  chantier est là : renouveler le laissez-passer sans personne devant l'écran.
+  le laissez-passer tient un peu plus de deux heures — réglé le 4 septembre
+  par le clic automatique (voir plus haut).
 - **Cote des cartes Bulbapedia** : Cardmarket vend tout, mais derrière
   Cloudflare — passerait par le navigateur piloté, comme les offres.
 - **Veille en 227 s** au premier passage : à observer, le garde-fou est à
