@@ -5,6 +5,33 @@ Ce qui a été fait, séance par séance, avec le *où* et le *comment* — le
 après une pause ; le dossier de bord de la tablette, lui, est dans
 `deploy/tablette/LISEZMOI.md`.
 
+## 8 septembre 2026 — Une alerte leboncoin arrivait une heure après l'annonce
+
+En une phrase : un Groudon EX à 50 € mis en ligne à 13 h 24 n'a été annoncé sur
+Discord qu'à 14 h 33, déjà vendu — la rotation des cartes leboncoin et l'ordre
+veille/collecteur additionnaient jusqu'à une heure et demie de retard ; le
+collecteur interroge maintenant toutes les cartes à chaque quart d'heure, et
+passe avant la veille.
+
+- **Lecture des journaux de la tablette** : le cycle tournait bien tous les
+  quarts d'heure. Mais `collect/lbc.py` ne sondait que 12 cartes sur 50 par
+  passage — la carte `bw5-106` avait eu son tour à 13 h 03, le suivant à
+  14 h 18, cinq passages plus tard. Puis la veille, qui alerte, tournait
+  *avant* le collecteur dans `lancer.sh` : ce qu'il déposait à 14 h 18 n'a été
+  lu qu'à 14 h 30. Pire cas de l'ancien montage : 75 + 15 = 90 minutes.
+- **Datadome ne justifiait plus la tranche** : les deux cents derniers passages
+  du journal leboncoin de la tablette ne montrent aucun refus (une seule panne
+  DNS). La seule requête qu'il conteste est l'amorçage, payé une fois par
+  passage. `CARD_SLICE` vaut donc `None` — toutes les cartes — avec
+  `LBC_CARD_SLICE` pour rétablir une tranche au besoin ; l'offset reste en
+  place pour cela. Garde-fou du collecteur porté de 5 à 7 minutes (~62
+  requêtes espacées de 2 s).
+- **Ordre du cycle** : leboncoin puis veille. Le collecteur rejoue la liste de
+  requêtes de la veille précédente ; une carte épinglée à l'instant n'attend
+  qu'un passage.
+- Nouveau pire cas : un quart d'heure plus la durée du passage, deux à trois
+  minutes.
+
 ## 4 septembre 2026 — Cardmarket se débrouille seul avec Cloudflare
 
 En une phrase : le laissez-passer Cloudflare de Cardmarket expire toutes les

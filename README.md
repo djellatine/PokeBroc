@@ -773,10 +773,17 @@ Elles sont simplement rares. Le site publie ~78 annonces de cartes par heure ; l
 carte précise soit dans le lot d'une heure donnée est infime, et un flux générique ne la croisera
 jamais. D'où une requête par carte suivie.
 
-**Et d'où la rotation.** Quarante-huit requêtes par quart d'heure quadrupleraient le trafic vers un
-site qui en refuse déjà une sur trois. Chaque passage en prend douze, et le tour complet se boucle en
-une heure — très en deçà du rythme auquel ces annonces apparaissent. Un passage coûte donc seize
-requêtes au lieu de douze, mesuré à 44 s.
+**Toutes à chaque passage.** Elles ont d'abord tourné par tranches de douze — un tour complet en une
+heure — pour ménager un Datadome qui refusait une requête sur trois. Ce tour d'une heure a coûté une
+annonce le 8 septembre 2026 : un Groudon EX à 50 € mis en ligne à 13 h 24, dont la carte n'a été
+réinterrogée qu'à 14 h 18, alerté à 14 h 33, déjà vendu. Depuis la tablette, deux cents passages sans
+un refus ; et la seule requête que Datadome conteste, l'amorçage, se paie une fois par passage quel
+que soit le nombre de cartes. Cinquante cartes font donc soixante-deux requêtes espacées de 2 s, deux
+à trois minutes par quart d'heure. `LBC_CARD_SLICE=12` rétablit la tranche si Datadome se réveillait.
+
+Dans le même mouvement, le lanceur de la tablette joue le collecteur **avant** la veille : c'est elle
+qui alerte, sur ce qu'il vient de déposer. Dans l'autre ordre, chaque annonce leboncoin attendait le
+quart d'heure suivant.
 
 Le partage des rôles suit celui du reste du projet : **`lib/lbc.ts` compose les requêtes**, le
 collecteur les joue. `bestQuery` s'appuie sur `searchName`, qui traduit `☆` en « gold star » et
@@ -790,7 +797,7 @@ au total**, toutes justes.
 ### « Actualiser » relance aussi leboncoin
 
 Le bouton promet « on regarde maintenant ». Il ne le tenait que pour deux sources sur trois :
-leboncoin n'affichait que ce que la dernière minuterie avait déposé, donc jusqu'à un tour de rotation
+leboncoin n'affichait que ce que la dernière minuterie avait déposé, donc jusqu'à un quart d'heure
 plus tôt. Node ne peut pas interroger leboncoin lui-même — c'est tout le sujet de la section
 précédente — il lance donc le script Python, désigné par `LBC_PYTHON`.
 

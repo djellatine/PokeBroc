@@ -120,12 +120,23 @@ PAGES_PER_QUERY = 3
 # sur `first_publication_date`, seule date de publication réelle.
 DEFAULT_WINDOW_H = 3.0
 
-# Requêtes par carte jouées à chaque passage. Le tour complet se boucle donc en
-# `ceil(cartes / SLICE)` passages — à 48 cartes suivies et un passage par quart
-# d'heure, une heure. Interroger les 48 à chaque fois quadruplerait le trafic
-# vers un site qui en refuse déjà une sur trois, pour des annonces qui
-# apparaissent au rythme de quelques-unes par semaine et par carte.
-CARD_SLICE = 12
+# Requêtes par carte jouées à chaque passage. `None` : toutes, à chaque fois.
+#
+# La rotation par tranches de douze — un tour complet en `ceil(cartes / 12)`
+# passages, soit cinq quarts d'heure à 50 cartes — a coûté une annonce le
+# 8 septembre 2026 : un Groudon EX à 50 € mis en ligne à 13 h 24, dont la carte
+# n'a été réinterrogée qu'à 14 h 18, alerté à 14 h 33, déjà vendu. Une alerte
+# qui arrive une heure après l'annonce n'alerte rien : sur ces cartes-là, la
+# vente se joue dans les minutes qui suivent la mise en ligne.
+#
+# La tranche protégeait d'un Datadome qui refusait une requête sur trois — sur
+# le PC, en août. Depuis la tablette, deux cents passages du journal ne montrent
+# aucun refus, et la seule requête qu'il conteste est l'amorçage, payé une fois
+# par passage quel que soit le nombre de cartes. Le tour se fait donc en un
+# passage : ~50 requêtes à 2 s, deux minutes, largement dans le quart d'heure.
+# `LBC_CARD_SLICE` permet de revenir à une tranche si Datadome se réveillait ;
+# la mécanique de l'offset reste en place pour cela.
+CARD_SLICE: int | None = int(os.environ.get("LBC_CARD_SLICE") or 0) or None
 
 # Une seule page par carte : la requête est discriminante et triée par date, et
 # la page 2 remonte déjà à des mois. C'est le contraire des requêtes de lots,
@@ -430,19 +441,23 @@ def collect(
     return ordered, problems, impersonate, session
 
 
+def slice_size(total: int) -> int:
+    """Cartes interrogées à ce passage : toutes, sauf tranche imposée."""
+    return total if CARD_SLICE is None else min(CARD_SLICE, total)
+
+
 def collect_cards(
     session: requests.Session,
     queries: list[dict],
     previous: dict,
     verbose: bool,
 ) -> tuple[dict, int, list[str]]:
-    """Une tranche des cartes suivies, en repartant d'où le passage précédent
-    s'était arrêté.
+    """Les cartes suivies — toutes par défaut, ou une tranche qui repart d'où
+    le passage précédent s'était arrêté si `CARD_SLICE` en impose une.
 
-    Rend le dictionnaire complet — la tranche fraîche **par-dessus** ce qui
-    était déjà là, et non à la place. Sans cela, une carte hors tranche perdrait
-    ses annonces à chaque passage et n'en aurait qu'un quart d'heure par heure ;
-    c'est la rotation qui économise les requêtes, pas l'oubli.
+    Rend le dictionnaire complet — le frais **par-dessus** ce qui était déjà là,
+    et non à la place. Une carte refusée ou hors tranche garde ainsi ses
+    annonces précédentes plutôt que de disparaître jusqu'au passage suivant.
 
     Aucune notation ici : `scoreAll` décide en TypeScript, pour les trois places
     de marché par le même chemin. On dépose ce que leboncoin a rendu.
@@ -455,7 +470,7 @@ def collect_cards(
         return cards, offset, problems
 
     offset %= len(queries)
-    slice_ = [queries[(offset + i) % len(queries)] for i in range(min(CARD_SLICE, len(queries)))]
+    slice_ = [queries[(offset + i) % len(queries)] for i in range(slice_size(len(queries)))]
     now = int(time.time() * 1000)
 
     for entry in slice_:
@@ -469,7 +484,7 @@ def collect_cards(
         except Blocked as error:
             # Le passage garde ce qu'il a. Une carte non rafraîchie conserve
             # ses annonces précédentes, que `LBC_CARD_MAX_AGE_MS` périmera si
-            # le blocage dure — deux tours, soit un passage manqué absorbé.
+            # le blocage dure — deux heures, soit plusieurs passages manqués.
             problems.append(str(error))
             continue
         except (RuntimeError, ValueError, KeyError) as error:
@@ -585,8 +600,9 @@ def refresh_cards(target: Path, raw: str, verbose: bool) -> int:
         return 2
 
     previous = read_json(cards_target) or {}
-    # `CARD_SLICE` ne s'applique pas : le plafond est posé par l'appelant, qui
-    # seul sait combien de temps le visiteur accepte d'attendre.
+    # Une éventuelle tranche `LBC_CARD_SLICE` ne s'applique pas : le plafond est
+    # posé par l'appelant, qui seul sait combien de temps le visiteur accepte
+    # d'attendre.
     saved = CARD_SLICE
     try:
         globals()["CARD_SLICE"] = len(queries)
@@ -690,7 +706,7 @@ def main() -> int:
         snapshot["partial"] = " · ".join(dict.fromkeys(problems))
 
     elapsed = time.time() - started
-    swept = min(CARD_SLICE, len(queries))
+    swept = slice_size(len(queries))
     summary = (
         f"{len(items)} lots publiés dans les {args.window:g} h "
         f"+ {swept}/{len(queries)} cartes "

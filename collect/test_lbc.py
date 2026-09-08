@@ -175,6 +175,15 @@ class Rotation(unittest.TestCase):
         with mock.patch.object(lbc, "search", fake_search),              mock.patch.object(lbc, "CARD_SLICE", slice_size):
             return collect_cards(None, self.QUERIES, previous or {}, verbose=False)
 
+    def test_sans_tranche_toutes_les_cartes_a_chaque_passage(self):
+        """Le défaut depuis le 8 septembre 2026 : une annonce manquée d'une
+        heure parce que sa carte attendait son tour. L'offset boucle sur
+        lui-même, pour que revenir à une tranche reparte proprement."""
+        cards, offset, problems = self.collect({"offset": 4, "cards": {}}, slice_size=None)
+        self.assertEqual(sorted(cards), sorted(f"c{i}" for i in range(10)))
+        self.assertEqual(offset, 4)
+        self.assertEqual(problems, [])
+
     def test_premier_passage_prend_la_premiere_tranche(self):
         cards, offset, problems = self.collect()
         self.assertEqual(sorted(cards), ["c0", "c1", "c2"])

@@ -165,11 +165,14 @@ export async function searchLbcRecents(now = Date.now()): Promise<LbcItem[]> {
  * cartes par heure, et la probabilité qu'une carte précise soit dans le lot
  * d'une heure donnée est infime. Un flux générique ne les croisera jamais.
  *
- * D'où une requête par carte suivie. Et d'où la rotation : 48 requêtes par
- * quart d'heure quadrupleraient le trafic vers un site qui refuse déjà une
- * requête sur trois. Chaque passage en prend une tranche, et le tour complet
- * se boucle en une heure — ce qui reste très en deçà du rythme auquel ces
- * annonces apparaissent.
+ * D'où une requête par carte suivie, **toutes à chaque passage**. Elles ont
+ * longtemps tourné par tranches de douze, un tour complet en une heure, pour
+ * ménager un Datadome qui refusait une requête sur trois : ce tour d'une heure
+ * a fait manquer un Groudon EX à 50 € le 8 septembre 2026, alerté soixante-six
+ * minutes après sa mise en ligne, déjà vendu. Depuis la tablette Datadome ne
+ * refuse plus rien, et la seule requête qu'il conteste — l'amorçage — se paie
+ * une fois par passage quel que soit le nombre de cartes. Voir `CARD_SLICE`
+ * dans `collect/lbc.py`, qui garde la tranche en option.
  */
 
 /** Une carte suivie et le texte à chercher pour elle. */
@@ -181,9 +184,10 @@ export interface LbcQuery {
 /**
  * Les annonces trouvées pour une carte, avec la date de leur collecte.
  *
- * Datée carte par carte et non globalement : la rotation fait que deux cartes
- * du même instantané peuvent avoir été collectées à trois quarts d'heure
- * d'écart, et présenter la plus ancienne comme fraîche serait faux.
+ * Datée carte par carte et non globalement : une carte refusée par Datadome
+ * garde ses annonces du passage précédent, et une tranche `LBC_CARD_SLICE`
+ * espacerait encore les collectes ; présenter la plus ancienne comme fraîche
+ * serait faux.
  */
 export interface LbcCardResult {
   at: number;
@@ -192,7 +196,7 @@ export interface LbcCardResult {
 
 export interface LbcCardsSnapshot {
   at: number;
-  /** Rang de la prochaine requête à jouer : c'est la rotation qui l'avance. */
+  /** Rang de la prochaine requête à jouer quand une tranche est imposée ; sinon inchangé. */
   offset: number;
   cards: Record<string, LbcCardResult>;
 }
@@ -236,10 +240,9 @@ export async function readLbcCards(): Promise<LbcCardsSnapshot | null> {
 /**
  * Les annonces leboncoin d'une carte, si elles sont encore d'actualité.
  *
- * Le seuil est celui du tour de rotation, pas celui de `LBC_MAX_AGE_MS` : une
- * carte n'est réinterrogée qu'une fois par tour, donc ses annonces ont par
- * construction jusqu'à un tour d'âge. Les refuser à une heure ferait
- * clignoter la source à chaque passage.
+ * Le seuil est plus large que `LBC_MAX_AGE_MS` : une carte refusée par
+ * Datadome garde ses annonces précédentes, et les périmer au premier refus
+ * ferait clignoter la source à chaque passage.
  *
  * Rend une liste vide plutôt que de lever, à la différence de
  * `searchLbcRecents` : ici l'absence est le cas courant — la plupart des
@@ -260,11 +263,9 @@ export async function readLbcForCard(
 /**
  * Au-delà, les annonces d'une carte ne sont plus tenues pour à jour.
  *
- * Deux tours de rotation. Un seul aurait fait disparaître les annonces d'une
- * carte dès qu'un passage manque son tour — ce qui arrive une fois sur trois,
- * Datadome refusant à ce rythme — alors que l'annonce, elle, est toujours en
- * ligne. Deux tours absorbent un passage manqué sans jamais présenter comme
- * courante une annonce vieille de deux heures.
+ * Deux heures, soit huit passages au quart d'heure : plusieurs refus
+ * consécutifs de Datadome sont absorbés sans faire disparaître des annonces
+ * toujours en ligne, et rien de plus vieux n'est présenté comme courant.
  */
 export const LBC_CARD_MAX_AGE_MS = 2 * 60 * 60 * 1000;
 
@@ -274,10 +275,9 @@ export const LBC_CARD_MAX_AGE_MS = 2 * 60 * 60 * 1000;
  * Relancer le collecteur depuis le site, sur clic d'« Actualiser ».
  *
  * Les deux autres places de marché se réinterrogent à la demande ; leboncoin,
- * lui, ne montrait que ce que la dernière minuterie avait déposé — jusqu'à une
- * heure de retard, puisque c'est la durée d'un tour de rotation. Le bouton
- * promet « on regarde maintenant » ; il tenait cette promesse pour deux
- * sources sur trois.
+ * lui, ne montrait que ce que la dernière minuterie avait déposé — jusqu'à un
+ * quart d'heure de retard. Le bouton promet « on regarde maintenant » ; il
+ * tenait cette promesse pour deux sources sur trois.
  *
  * Node ne peut pas interroger leboncoin lui-même : c'est tout le sujet de
  * l'en-tête de ce module, sa pile TLS se fait refuser. Il lance donc le script

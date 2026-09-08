@@ -9,9 +9,12 @@
 #
 # Ce qu'il fait, calqué sur deploy/*.timer :
 #   - le site (`npm start`), relancé s'il tombe — l'équivalent de Restart=always ;
-#   - la veille puis le collecteur leboncoin, à chaque quart d'heure — les deux
+#   - le collecteur leboncoin puis la veille, à chaque quart d'heure — les deux
 #     minuteries étaient décalées de cinq minutes pour ne pas se disputer le
-#     processeur ; ici elles s'enchaînent, ce qui règle la question ;
+#     processeur ; ici elles s'enchaînent, ce qui règle la question. Dans cet
+#     ordre : c'est la veille qui alerte, et elle lit ce que le collecteur vient
+#     de déposer. L'inverse faisait attendre chaque annonce leboncoin le quart
+#     d'heure suivant ;
 #   - la mise à jour depuis GitHub, à chaque quart d'heure aussi — l'équivalent
 #     de deploy/deployer.sh, que la CI lançait sur le VPS ; ici la tablette
 #     tire elle-même, aucun port n'étant ouvert vers elle ;
@@ -210,6 +213,20 @@ while true; do
   jour=$(date +%F)
   log="$JOURNAL/collecte-$jour.log"
 
+  # Leboncoin d'abord, la veille ensuite : la veille alerte sur ce qu'elle lit
+  # dans `.data/lbc/cartes.json`, et ce fichier doit donc être frais quand elle
+  # passe. Dans l'autre ordre, une annonce déposée par le collecteur attendait
+  # la veille du quart d'heure suivant — quinze minutes perdues à chaque fois.
+  # Le collecteur rejoue la liste de requêtes que la veille précédente a
+  # déposée ; une carte épinglée à l'instant n'attend qu'un passage.
+  #
+  # Sept minutes de garde-fou : toutes les cartes suivies sont interrogées à
+  # chaque passage (~50 requêtes espacées de 2 s, plus les lots), soit deux à
+  # trois minutes en régime normal.
+  echo "── $(date '+%F %T') leboncoin" >>"$log"
+  (cd "$RACINE" && timeout 420 "$VENV/bin/python" collect/lbc.py --quiet) >>"$log" 2>&1 \
+    || echo "leboncoin en échec (code $?)" >>"$log"
+
   echo "── $(date '+%F %T') veille" >>"$log"
   # Garde-fou de durée, pour couper net un passage qui ne finirait pas. Dix
   # minutes et non trois : chaque requête a désormais son propre délai (quinze
@@ -218,10 +235,6 @@ while true; do
   # journal, et ces trous-là passaient pour des alertes perdues.
   (cd "$RACINE" && timeout 600 npm run veille -- --quiet) >>"$log" 2>&1 \
     || echo "veille en échec (code $?)" >>"$log"
-
-  echo "── $(date '+%F %T') leboncoin" >>"$log"
-  (cd "$RACINE" && timeout 300 "$VENV/bin/python" collect/lbc.py --quiet) >>"$log" 2>&1 \
-    || echo "leboncoin en échec (code $?)" >>"$log"
 
   # Après la collecte et non avant : une construction de vingt minutes ne doit
   # pas retarder le passage de la veille.
