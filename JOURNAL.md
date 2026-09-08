@@ -31,6 +31,14 @@ passe avant la veille.
   qu'un passage.
 - Nouveau pire cas : un quart d'heure plus la durée du passage, deux à trois
   minutes.
+- **Le déploiement a tué le lanceur.** Première fois que `lancer.sh` changeait
+  depuis que la tablette se met à jour seule : le lanceur relancé s'est vu
+  « déjà actif » et s'est retiré — plus de site ni de collecte de 17 h 50 à
+  17 h 52, relancé à la main par SSH. Le verrou `flock` sur le descripteur 9
+  est hérité par la boucle du site et par `next-server`, et tuer le parent ne
+  le libère pas tant que les enfants agonisent. `flock -u 9` avant l'`exec`.
+  Ce correctif-là, le lanceur en place ne pouvait pas le tirer sans mourir
+  encore une fois : tiré et relancé à la main.
 
 ## 4 septembre 2026 — Cardmarket se débrouille seul avec Cloudflare
 

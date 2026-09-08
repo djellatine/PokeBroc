@@ -41,7 +41,7 @@ Dans le Debian :
 ## Comment ça tourne
 
 Un seul script fait tout : `deploy/tablette/lancer.sh`, à lire pour le détail.
-En résumé : le site (relancé s'il tombe), veille puis leboncoin à chaque quart
+En résumé : le site (relancé s'il tombe), leboncoin puis la veille à chaque quart
 d'heure, sauvegarde vers 4 h du matin, un Xvfb pour Cardmarket, et un verrou
 (`/root/.pokebroc-lanceur.verrou`) qui rend tout double lancement inoffensif.
 

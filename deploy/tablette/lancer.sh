@@ -48,8 +48,8 @@ fi
 
 # Un seul lanceur à la fois : Termux:Boot et un lancement à la main ne doivent
 # pas empiler deux sites et deux boucles de collecte. Le verrou est tenu sur le
-# descripteur 9, que `exec bash` conserve : un lanceur qui se relance ne se
-# trouve pas lui-même déjà actif.
+# descripteur 9 ; un lanceur qui se relance le rend d'abord (voir
+# `redemarrer_lanceur`), sans quoi il se trouverait lui-même déjà actif.
 exec 9>/root/.pokebroc-lanceur.verrou
 if ! flock -n 9; then
   echo "lanceur déjà actif, rien à faire"
@@ -153,11 +153,21 @@ reconstruire_site() {
 }
 
 # Le lanceur lui-même a changé : on relance le site et ce script, qui repart
-# de sa nouvelle copie. Le verrou suit (descripteur 9 conservé par `exec`).
+# de sa nouvelle copie.
+#
+# Le verrou doit être rendu explicitement avant. Il est posé sur le descripteur
+# 9, que la boucle du site et ses enfants (`npm`, `next-server`) ont hérité :
+# un `flock` suit la description de fichier ouverte, partagée par tous ceux qui
+# tiennent ce descripteur, et tuer le parent ne le libère pas tant qu'un enfant
+# n'a pas fini de mourir. Le 8 septembre 2026, le lanceur relancé s'est vu
+# « déjà actif » à cause de ses propres processus agonisants, et s'est retiré :
+# plus de site, plus de collecte, jusqu'à un redémarrage à la main. `flock -u`
+# déverrouille la description pour tous ses porteurs, morts ou vifs.
 redemarrer_lanceur() {
   echo "le lanceur a changé : redémarrage"
   kill "$SITE_PID" 2>/dev/null
   pkill -f next-server
+  flock -u 9
   exec bash "$RACINE/deploy/tablette/lancer.sh"
 }
 
