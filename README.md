@@ -665,10 +665,13 @@ pour un fichier de 18 Ko**, des `502` par salves, et des requêtes qui n'aboutis
 
 - **Cartes** : [TCGdex](https://tcgdex.dev) en français, sans clé d'API. Fournit aussi les cotes
   Cardmarket.
-- **Annonces** : API catalogue de Vinted. Elle n'est pas publiquement documentée et exige des
-  cookies de session anonyme : `lib/vinted.ts` en ouvre une en visitant la page d'accueil, la garde
-  ~9 minutes en mémoire et la renouvelle automatiquement sur un `401`. Les appels sortants sont
-  sérialisés (350 ms minimum entre deux) et les résultats mis en cache 90 secondes.
+- **Annonces** : catalogue de Vinted (`api.vinted.fr/svc-catalogue/items`). Il n'est pas
+  publiquement documenté et exige le cookie de session anonyme `access_token_web`, que seul un
+  vrai navigateur obtient depuis septembre 2026 : `collect/vinted_session.py` l'ouvre et le dépose
+  dans `.data/vinted/session.json`, `lib/vinted.ts` le lit et le fait renouveler quand il manque,
+  expire (vingt-quatre heures) ou se fait refuser. Voir « Pourquoi Vinted passe par un amorceur ».
+  Les appels sortants sont sérialisés (350 ms minimum entre deux) et les résultats mis en cache
+  90 secondes.
 - **Lots leboncoin** : collectés par `collect/lbc.py`, hors du site. Voir ci-dessous.
 - **Offres Cardmarket** : collectées par `collect/cardmarket.py`, hors du site, pour les seules cartes
   cochées « précieuse » (bouton **CM** du bandeau de collection). Voir ci-dessous et la page d'aide
@@ -736,6 +739,51 @@ lanceur. Sur la tablette, c'est le repli Chromium ci-dessus qui la rend possible
 L'**API officielle** aurait été plus propre (30 000 requêtes/jour), mais elle est réservée aux
 vendeurs professionnels et n'accepte plus de nouvelles demandes (vérifié le 31 août 2026) : le
 scraping reste la seule voie, assumée fragile.
+
+### Pourquoi Vinted passe par un amorceur
+
+Jusqu'au 12 septembre 2026, `lib/vinted.ts` se suffisait : un `fetch` de la page d'accueil rendait
+le cookie `access_token_web`, et `/api/v2/catalog/items` répondait avec. Le 13, deux choses ont
+changé d'un coup, constatées le 20 dans les sauvegardes quotidiennes (28 à 35 annonces Vinted par
+carte le 12, zéro depuis) : Vinted a mis **Cloudflare devant tout `www.vinted.fr`** — défi
+JavaScript « Un instant… », jusque sur `robots.txt` — et a **déplacé son catalogue** sur
+`api.vinted.fr/svc-catalogue/items`, l'ancien chemin rendant 404.
+
+Mesuré le 20 septembre 2026 :
+
+| Client | Page d'accueil | Catalogue avec le seul `access_token_web` |
+| --- | --- | --- |
+| `fetch` de Node, `curl` nu | 403, un seul cookie `__cf_bm`, jamais de jeton | 200 |
+| `curl_cffi` (Chrome, Firefox, Safari) | 403, idem | 200 |
+| Navigateur fenêtré sans marque d'automatisation (PC comme tablette) | jeton en deux secondes, **sans même voir le défi** | — |
+| Sans cookie | — | 403 `FORBIDDEN` |
+
+Deux conclusions. Le jeton ne s'obtient plus qu'en navigateur. Mais le catalogue, lui, **n'est pas
+derrière le défi** : il accepte le cookie depuis n'importe quelle pile HTTP, sans jeton CSRF ni
+identifiant anonyme — à l'inverse de Cardmarket, où le laissez-passer est lié à l'empreinte TLS du
+navigateur qui l'a obtenu. Et le jeton est un JWT valable **vingt-quatre heures**.
+
+D'où un partage plus léger encore que celui de Cardmarket : `collect/vinted_session.py` — l'*amorceur*
+— ne collecte rien. Il ouvre la page d'accueil dans le navigateur de `collect/cloudflare.py` (le même
+que Cardmarket : profil persistant `.data/vinted/profil`, fenêtre hors écran ou sur l'écran virtuel
+de la tablette, case Cloudflare cochée par XTEST si elle se présente un jour) et dépose
+`.data/vinted/session.json` : cookies, `User-Agent`, expiration. Les centaines de recherches
+quotidiennes du fil, des lots et de la veille restent en TypeScript, avec le `fetch` de Node.
+
+`lib/vinted.ts` lit ce fichier, le relit s'il change (l'autre processus a pu le renouveler), et lance
+lui-même l'amorceur — désigné par `VINTED_PYTHON`, comme `LBC_PYTHON` et `CARDMARKET_PYTHON` —
+quand la session manque, expire dans moins de cinq minutes ou se fait refuser (`401`/`403`, une
+seule relance). Un amorçage raté met cinq minutes de répit avant le suivant : la veille en
+déclencherait sinon deux cents en un passage. Deux processus qui amorcent en même temps ne font
+qu'un navigateur : le second attend le verrou puis trouve une session de moins d'une minute et s'en
+contente. Sans `VINTED_PYTHON`, le site se sert du fichier tel quel et dit, quand il manque, de
+lancer `python collect/vinted_session.py` à la main.
+
+Ce que le nouveau catalogue ne donne plus : **la date de mise en ligne**. L'ancien la laissait
+deviner par l'horodatage de la photo ; le nouveau ne le porte plus. `createdAt` reste `null` pour
+Vinted — le tri « nouveautés » repose sur `newest_first` côté Vinted et sur `firstSeen` côté fil,
+qui n'en a jamais dépendu. La marque et l'état, eux, ont migré dans les deux lignes de la vignette
+(`item_box`), et les liens sont devenus relatifs.
 
 ### Pourquoi leboncoin passe par un script Python
 
@@ -1302,7 +1350,7 @@ lib/
   japanese.ts               noms japonais ↔ français, pour chercher et noter les cartes japonaises
   bulbapedia.ts             second catalogue japonais : pages d'espèce et de carte de Bulbapedia
   pokedex-names.ts          table des espèces (ja, fr, en), générée depuis PokéAPI
-  vinted.ts                 session, throttle, cache, normalisation
+  vinted.ts                 catalogue Vinted : session lue sur disque, throttle, cache, normalisation
   lbc.ts                    lots et cartes leboncoin (aucune requête : voir collect/)
   match.ts                  notation des annonces, état, requêtes, vocabulaires éliminatoires
   format.ts                 euros, pourcentages, ancienneté
@@ -1313,6 +1361,8 @@ collect/
   lbc.py                    collecteur leboncoin — lots, puis une tranche des cartes suivies
   test_lbc.py               ses tests, sans réseau
   cardmarket.py             collecteur Cardmarket — navigateur piloté, Edge ou Chromium
+  vinted_session.py         amorceur Vinted — ouvre la session anonyme en navigateur, la dépose pour le site
+  cloudflare.py             le navigateur et le défi Cloudflare, partagés par les deux précédents
   veille.ts                 balayage de fond + alertes — hors du site, sur minuterie
 deploy/
   installer.sh              provisionnement d'un VPS neuf, une seule fois
@@ -1343,6 +1393,9 @@ tests/                      node:test — match, japanese, bulbapedia, tcgdex, c
   l'ajout de vingt cartes reste donc longue ; les suivantes lisent le disque.
 - « Prix observés » est un prix **demandé**, pas un prix de vente : le catalogue Vinted ne dit pas à
   quel prix une annonce est partie, ni même si elle est partie.
+- Le catalogue Vinted de septembre 2026 ne donne plus la date de mise en ligne : une annonce Vinted
+  n'a pas d'ancienneté affichable, et les lots Vinted se classent après ceux qui en ont une. La
+  session, elle, dépend d'un navigateur amorceur (voir « Pourquoi Vinted passe par un amorceur »).
 - Vinted plafonne les résultats à ~20 pages ; les requêtes ciblées restent préférables.
 - La page Lots retient aussi les produits scellés — `coffret`, `display`, `booster` font partie
   des mots qui signalent un lot. Un « Coffret Méga-Latias-ex (4 boosters) » y figure donc, sans

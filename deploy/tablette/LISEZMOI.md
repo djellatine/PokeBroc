@@ -42,13 +42,15 @@ Dans le Debian :
 
 Un seul script fait tout : `deploy/tablette/lancer.sh`, à lire pour le détail.
 En résumé : le site (relancé s'il tombe), leboncoin puis la veille à chaque quart
-d'heure, sauvegarde vers 4 h du matin, un Xvfb pour Cardmarket, et un verrou
-(`/root/.pokebroc-lanceur.verrou`) qui rend tout double lancement inoffensif.
+d'heure, sauvegarde vers 4 h du matin, un Xvfb pour Cardmarket et l'amorceur
+Vinted, et un verrou (`/root/.pokebroc-lanceur.verrou`) qui rend tout double
+lancement inoffensif.
 
 - Journaux : `/root/journal` — `site.log`, `lanceur.log`, `collecte-AAAA-MM-JJ.log`
   (un par jour, purgés après 14 jours).
 - Sauvegardes : `/root/sauvegardes`, quatorze `data-*.tar.gz` glissants
-  (350 Ko pièce : `img-cache/` et le profil Chromium sont exclus). **Une copie
+  (350 Ko pièce : `img-cache/` et les profils Chromium, Cardmarket comme
+  Vinted, sont exclus). **Une copie
   quitte la tablette chaque jour** : depuis le 4 septembre 2026, la tâche
   planifiée Windows « PokeBroc-Sauvegarde » du PC (`sauvegarde-pc.ps1` dans
   ce dossier) va chercher la dernière archive par SSH, à 9 h et à chaque
@@ -204,6 +206,33 @@ en mode visible) ; TightVNC Viewer sur le PC affichait du noir là où
 `xdotool` sont installés dans le Debian pour inspecter et déplacer les fenêtres
 (`DISPLAY=:9 xwininfo -root -tree`, `xdotool windowmove`).
 
+### La session Vinted s'ouvre toute seule, une fois par jour
+
+Depuis le 20 septembre 2026, Vinted ne rend plus son cookie de session qu'à
+un vrai navigateur (Cloudflare devant `www.vinted.fr`, voir le README,
+« Pourquoi Vinted passe par un amorceur »). Le site et la veille lancent donc
+eux-mêmes `collect/vinted_session.py` (`VINTED_PYTHON`, posé par le lanceur)
+quand `.data/vinted/session.json` manque, expire ou se fait refuser : un
+Chromium sur `:9`, la page d'accueil, le cookie, et c'est fini — sept
+secondes sur le PC, une quinzaine ici. Le jeton vaut vingt-quatre heures, on
+doit donc voir dans `.data/vinted/collect.log` une ligne « session ouverte »
+par jour, guère plus. Le défi Cloudflare, s'il se présente, se lève comme
+celui de Cardmarket (XTEST, même code).
+
+Ce qu'on regarde quand le fil n'a plus de Vinted :
+
+```sh
+tail -3 /root/PokeBroc/.data/vinted/collect.log
+grep -o '"partial":"[^"]*Vinted[^"]*"' /root/PokeBroc/.data/feed/*.json | sort | uniq -c | sort -rn | head -3
+cd /root/PokeBroc && DISPLAY=:9 /root/venv/bin/python collect/vinted_session.py --force
+```
+
+« Vinted a répondu 404 » ou « aucun jeton reçu » sur toutes les cartes, c'est
+Vinted qui a encore changé quelque chose — pas la tablette. Le 13 septembre
+2026, ça a été le chemin du catalogue et Cloudflare d'un coup ; personne ne
+l'a vu pendant une semaine, parce que la veille continuait de balayer
+leboncoin et de dire « 0 alerte ».
+
 ## Mettre à jour le site après des modifs
 
 Depuis le 3 septembre 2026, **la tablette se met à jour toute seule**. Le
@@ -267,8 +296,12 @@ doublons). Le site met une à deux minutes à répondre sur ce processeur.
 - **Après un `git pull` qui touche `lib/` ou `app/`** : `npm run build`
   obligatoire avant de relancer, sinon le site sert l'ancien code (15-30 min
   sur la tablette).
-- **Chromium sous proot** exige `--no-sandbox` — le collecteur Cardmarket le
-  fait tout seul quand il se croit root.
+- **Chromium sous proot** exige `--no-sandbox` — le collecteur Cardmarket et
+  l'amorceur Vinted le font tout seuls quand ils se croient root.
+- **Un fil sans Vinted ne fait pas d'alerte** : la veille balaie leboncoin et
+  dit « 0 alerte » comme si de rien n'était. Une semaine perdue en
+  septembre 2026. Le signe qui ne trompe pas : `partial` dans
+  `.data/feed/*.json` sur toutes les cartes (voir « La session Vinted »).
 
 ## Ce qui reste à faire, et le contexte côté PC
 

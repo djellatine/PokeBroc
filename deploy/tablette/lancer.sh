@@ -64,11 +64,15 @@ export NODE_ENV=production
 export SESSION_HTTP=1
 export LBC_PYTHON="$VENV/bin/python"
 export CARDMARKET_PYTHON="$VENV/bin/python"
+# L'amorceur Vinted (`collect/vinted_session.py`) : le site et la veille le
+# lancent eux-mêmes quand la session du jour manque ou expire.
+export VINTED_PYTHON="$VENV/bin/python"
 
-# Écran virtuel : le collecteur Cardmarket lance un navigateur *fenêtré* (plus
-# crédible qu'un headless face à Cloudflare), et une fenêtre exige un serveur
-# X. Xvfb en fournit un en mémoire, sans écran. S'il manque, Cardmarket à la
-# demande échouera mais rien d'autre ne bouge : `apt install xvfb` le règle.
+# Écran virtuel : le collecteur Cardmarket et l'amorceur Vinted lancent un
+# navigateur *fenêtré* (plus crédible qu'un headless face à Cloudflare), et une
+# fenêtre exige un serveur X. Xvfb en fournit un en mémoire, sans écran. S'il
+# manque, ces deux-là échoueront mais rien d'autre ne bouge : `apt install xvfb`
+# le règle.
 if command -v Xvfb >/dev/null; then
   if ! pgrep -x Xvfb >/dev/null; then
     Xvfb :9 -screen 0 1280x900x24 >>"$JOURNAL/xvfb.log" 2>&1 &
@@ -255,13 +259,14 @@ while true; do
     horodatage=$(date +%Y-%m-%d_%H%M)
     archive="$SAUVEGARDES/data-$horodatage.tar.gz"
     # Nom temporaire puis renommage, comme deploy/sauvegarde.sh : une archive à
-    # moitié écrite ne doit jamais passer pour une sauvegarde valide. Le profil
-    # du navigateur Cardmarket est exclu comme le cache d'images : lourd, et
-    # tout s'y reconstruit (au pire un défi Cloudflare à relever).
+    # moitié écrite ne doit jamais passer pour une sauvegarde valide. Les profils
+    # de navigateur (Cardmarket, Vinted) sont exclus comme le cache d'images :
+    # lourds, et tout s'y reconstruit (au pire un défi Cloudflare à relever).
     if tar --create --gzip --file "$archive.partiel" \
            --directory "$RACINE" \
            --exclude='.data/img-cache' \
            --exclude='.data/cardmarket/profil' \
+           --exclude='.data/vinted/profil' \
            .data >>"$log" 2>&1; then
       mv "$archive.partiel" "$archive"
       echo "sauvegarde : $archive" >>"$log"
