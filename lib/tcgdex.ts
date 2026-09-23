@@ -447,11 +447,14 @@ async function fetchByName(name: string, lang: Lang = "fr"): Promise<CardBrief[]
  * voir `searchJapanese`.
  */
 /**
- * Nombre maximal de cartes rendues à l'aperçu. Bien au-dessus du Pokémon le
- * plus imprimé, pour qu'aucune carte ne manque à qui parcourt tout un nom ;
- * l'aperçu n'en montre que les premières tant qu'on ne les demande pas toutes.
+ * Nombre maximal de cartes rendues à l'aperçu, aligné sur la page TCGdex.
+ * Mesuré le 23 septembre 2026 sur toute la base française (22 170 cartes) :
+ * le nom le plus imprimé est « Énergie » (625 cartes), puis Pikachu (221) ;
+ * Pikachu en base japonaise, Bulbapedia compris, en fait 389. Un plafond de
+ * 400 coupait donc encore. L'aperçu n'en montre que les premières tant qu'on
+ * ne les demande pas toutes, et 625 cartes pèsent 90 Ko.
  */
-const SEARCH_LIMIT = 400;
+const SEARCH_LIMIT = FETCH_PAGE;
 
 export async function searchCards(
   query: string,
