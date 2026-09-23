@@ -652,7 +652,7 @@ pour un fichier de 18 Ko**, des `502` par salves, et des requêtes qui n'aboutis
    finit par apparaître. Sans ce garde-fou, dix-huit requêtes bloquées épuisent les connexions du
    navigateur et figent tout le site. Un `404` de TCGdex est retenu dix minutes, pour ne pas
    réessayer une image qui n'existe pas.
-3. **Préchauffage** — `/api/cards` lance le téléchargement des 18 premiers visuels sans les attendre,
+3. **Préchauffage** — `/api/cards` lance le téléchargement des 24 premiers visuels sans les attendre,
    dès la frappe.
 4. **Repli sur la base anglaise** — environ 13 % des cartes n'ont pas d'illustration côté français,
    et les deux tiers d'entre elles en ont une côté anglais. C'est la même illustration ; seul le

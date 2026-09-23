@@ -8,7 +8,7 @@ export const runtime = "nodejs";
  * Visuels dont on lance le téléchargement dès la recherche. Correspond à ce que
  * l'aperçu montre d'emblée (`PREVIEW_LIMIT` dans `components/CardSearch.tsx`).
  */
-const WARM_COUNT = 18;
+const WARM_COUNT = 24;
 
 export async function GET(request: NextRequest) {
   const query = request.nextUrl.searchParams.get("q")?.trim() ?? "";

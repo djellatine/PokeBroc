@@ -18,12 +18,13 @@ import type { CardListItem } from "@/lib/tcgdex";
  */
 
 /**
- * Nombre de vignettes montrées d'emblée. Une recherche large en renvoie jusqu'à
- * 60, soit autant de visuels à télécharger avant que l'aperçu paraisse rempli.
- * Le classement place déjà les correspondances exactes en tête ; le reste est à
- * un clic.
+ * Nombre de vignettes montrées d'emblée. Une recherche large en renvoie
+ * plusieurs centaines, soit autant de visuels à télécharger avant que l'aperçu
+ * paraisse rempli. Le classement place déjà les correspondances exactes en
+ * tête ; le reste est à un clic. Vingt-quatre : des rangées pleines à trois,
+ * quatre, six ou huit colonnes.
  */
-const PREVIEW_LIMIT = 18;
+const PREVIEW_LIMIT = 24;
 
 /** Ciblé par la page d'accueil pour amener le curseur ici depuis son appel à l'action. */
 export const SEARCH_INPUT_ID = "recherche-carte";
@@ -211,7 +212,9 @@ export default function CardSearch({
   }
 
   return (
-    <div ref={rootRef} className="relative w-full">
+    // Pas de `relative` ici : l'aperçu se positionne par rapport à la rangée
+    // de l'en-tête (`app/layout.tsx`), pour s'étaler sur toute sa largeur.
+    <div ref={rootRef} className="w-full">
       <div className="relative max-w-xl">
         <svg
           className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-faint"
@@ -275,7 +278,7 @@ export default function CardSearch({
       </div>
 
       {showPanel && (
-        <div className="absolute left-0 top-full z-50 mt-2 w-[min(46rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-line-strong bg-panel shadow-[0_28px_70px_-24px_rgba(0,0,0,0.95)]">
+        <div className="absolute inset-x-4 top-full z-50 mt-2 overflow-hidden rounded-xl border border-line-strong bg-panel shadow-[0_28px_70px_-24px_rgba(0,0,0,0.95)]">
           <div className="flex items-center justify-between gap-3 border-b border-line px-3 py-2">
             <p className="text-[11px] text-dim" aria-live="polite">
               {status === "loading"
@@ -312,15 +315,18 @@ export default function CardSearch({
             </p>
           )}
 
-          {/* Hauteur réduite sur mobile : le clavier virtuel mange la moitié
-              basse de l'écran, et l'aperçu passait dessous. */}
+          {/* La hauteur suit l'écran, moins l'en-tête et le cadre du panneau :
+              la liste prend toute la place disponible et rien de plus. `dvh`
+              plutôt que `vh` : sur téléphone, le clavier virtuel réduit la
+              fenêtre et la liste avec, au lieu de passer dessous. Sur bureau,
+              autant de colonnes que la largeur en loge, à 10 rem chacune. */}
           {cards.length > 0 && (
             <ul
               ref={listRef}
               id="apercu-cartes"
               role="listbox"
               aria-label="Cartes correspondantes"
-              className="grid max-h-[17rem] grid-cols-3 gap-2 overflow-y-auto p-2 sm:max-h-[24rem] sm:grid-cols-5 md:grid-cols-6"
+              className="grid max-h-[calc(100dvh-12.5rem)] grid-cols-3 gap-2 overflow-y-auto p-2 sm:max-h-[calc(100dvh-10rem)] sm:grid-cols-[repeat(auto-fill,minmax(10rem,1fr))]"
             >
               {visible.map((card, index) => {
                 const added = isFavorite(card.id);

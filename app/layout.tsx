@@ -45,7 +45,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
               en pleine largeur dessous. Sur une seule rangée, tout le menu était
               `shrink-0` et c'est la recherche qui payait — écrasée à quelques
               pixels pendant que le reste débordait de l'écran. */}
-          <div className="mx-auto flex w-full max-w-[1360px] flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2 sm:h-14 sm:flex-nowrap sm:py-0">
+          {/* `relative` : l'aperçu de la recherche s'ancre sur cette rangée
+              entière, pas sur le champ, pour s'étaler sous tout l'en-tête. */}
+          <div className="relative mx-auto flex w-full max-w-[1360px] flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2 sm:h-14 sm:flex-nowrap sm:py-0">
             <Link href="/" className="flex shrink-0 items-center gap-2" aria-label="PokeBroc">
               <span className="grid h-7 w-7 place-items-center rounded-lg bg-accent text-sm font-black text-accent-ink">
                 P
