@@ -27,6 +27,7 @@ export default function CardThumb({
   cardId,
   quality = "low",
   className = "relative h-full w-full object-cover",
+  lazy = false,
 }: {
   image: string | null | undefined;
   name: string;
@@ -34,6 +35,8 @@ export default function CardThumb({
   cardId?: string;
   quality?: "low" | "high";
   className?: string;
+  /** Vignette hors écran d'une longue liste : ne la charger qu'en approchant. */
+  lazy?: boolean;
 }) {
   const src =
     cachedCardImage(image ?? undefined, quality) ??
@@ -83,9 +86,11 @@ export default function CardThumb({
           // redemander l'image ; le cache serveur ne lit que le paramètre `src`.
           src={attempt === 0 ? src : `${src}&essai=${attempt}`}
           alt={name}
-          // Pas de `loading="lazy"` : les vignettes sont peu nombreuses et déjà
-          // visibles, et le différé retardait d'autant le seul appel qui compte,
-          // celui qui déclenche le téléchargement côté serveur.
+          // Pas de différé par défaut : les vignettes de l'aperçu sont déjà
+          // visibles, et il retardait d'autant le seul appel qui compte, celui
+          // qui déclenche le téléchargement côté serveur. Différé seulement pour
+          // la longue liste d'un nom très imprimé, une fois tout affiché.
+          loading={lazy ? "lazy" : undefined}
           onError={() => setFailed(true)}
           className={className}
         />

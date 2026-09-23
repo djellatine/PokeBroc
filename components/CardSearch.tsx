@@ -348,7 +348,12 @@ export default function CardSearch({
                     }`}
                   >
                     <div className="relative aspect-[63/88]">
-                      <CardThumb image={card.image} name={card.name} cardId={card.id} />
+                      <CardThumb
+                        image={card.image}
+                        name={card.name}
+                        cardId={card.id}
+                        lazy={index >= PREVIEW_LIMIT}
+                      />
                       <span
                         className={`absolute right-1 top-1 grid h-6 w-6 place-items-center rounded-full text-sm font-bold transition ${
                           added

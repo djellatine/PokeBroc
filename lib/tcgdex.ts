@@ -420,10 +420,18 @@ function accentVariants(query: string): string[] {
   return [...out].slice(0, MAX_VARIANTS);
 }
 
+/**
+ * Plafond d'une page TCGdex. L'API honore des pages bien plus grandes que ses
+ * 100 par défaut ; un Pokémon très imprimé (Pikachu : 221 cartes en français)
+ * tient largement dans celle-ci, et seule une saisie très vague (« ex ») la
+ * déborde — le classement met alors les correspondances exactes devant.
+ */
+const FETCH_PAGE = 1000;
+
 async function fetchByName(name: string, lang: Lang = "fr"): Promise<CardBrief[]> {
   try {
     return await tcgdex<CardBrief[]>(
-      `/cards?name=${encodeURIComponent(name)}&pagination:page=1&pagination:itemsPerPage=250`,
+      `/cards?name=${encodeURIComponent(name)}&pagination:page=1&pagination:itemsPerPage=${FETCH_PAGE}`,
       3600,
       lang,
     );
@@ -438,9 +446,16 @@ async function fetchByName(name: string, lang: Lang = "fr"): Promise<CardBrief[]
  * `lang: "ja"` interroge la base japonaise à partir d'une saisie française :
  * voir `searchJapanese`.
  */
+/**
+ * Nombre maximal de cartes rendues à l'aperçu. Bien au-dessus du Pokémon le
+ * plus imprimé, pour qu'aucune carte ne manque à qui parcourt tout un nom ;
+ * l'aperçu n'en montre que les premières tant qu'on ne les demande pas toutes.
+ */
+const SEARCH_LIMIT = 400;
+
 export async function searchCards(
   query: string,
-  limit = 60,
+  limit = SEARCH_LIMIT,
   lang: "fr" | "ja" = "fr",
 ): Promise<CardListItem[]> {
   const q = query.trim();
