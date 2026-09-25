@@ -21,8 +21,11 @@ export interface FavoriteInput {
 }
 
 const MAX_LENGTH = 300;
-/** Au-delà, le fil met plus d'une minute à se remplir et n'est plus lisible. */
-const MAX_FAVORITES = 60;
+/**
+ * Chaque carte coûte une requête par source et par passage : pas d'infini.
+ * À cent, leboncoin tient en ~4 min par quart d'heure (2 s entre requêtes).
+ */
+const MAX_FAVORITES = 100;
 
 function text(value: unknown): string | null {
   if (typeof value !== "string") return null;
