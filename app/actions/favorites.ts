@@ -23,9 +23,10 @@ export interface FavoriteInput {
 const MAX_LENGTH = 300;
 /**
  * Chaque carte coûte une requête par source et par passage : pas d'infini.
- * À cent, leboncoin tient en ~4 min par quart d'heure (2 s entre requêtes).
+ * À cent cinquante, leboncoin (~7 min) et la veille (~10 min, son `timeout
+ * 600` dans `deploy/tablette/lancer.sh`) sont au bord : ne pas monter plus.
  */
-const MAX_FAVORITES = 100;
+const MAX_FAVORITES = 150;
 
 function text(value: unknown): string | null {
   if (typeof value !== "string") return null;
