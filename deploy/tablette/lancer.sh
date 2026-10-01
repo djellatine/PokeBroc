@@ -250,6 +250,22 @@ while true; do
   (cd "$RACINE" && timeout 600 npm run veille -- --quiet) >>"$log" 2>&1 \
     || echo "veille en échec (code $?)" >>"$log"
 
+  # Signe de vie vers un service extérieur (healthchecks.io ou équivalent) :
+  # la veille prévient d'une source en panne, mais rien sur la tablette ne
+  # peut prévenir qu'elle est elle-même éteinte — du 28 au 29 septembre 2026,
+  # 39 heures d'arrêt passées inaperçues. Le service, lui, écrit quand les
+  # signes de vie cessent. Adresse dans `.env.local` (`SURVEILLANCE_URL`),
+  # relue à chaque passage ; absente, rien ne part. Un site qui ne répond plus
+  # envoie `/fail`, pour que la panne se voie même tablette allumée.
+  surveillance=$(sed -n 's/^SURVEILLANCE_URL=//p' "$RACINE/.env.local" 2>/dev/null | tr -d '\r"' | tail -n 1)
+  if [ -n "$surveillance" ]; then
+    if [ "$(curl -s -o /dev/null -m 20 -w '%{http_code}' http://127.0.0.1:3000/)" = "200" ]; then
+      curl -fsS -m 10 --retry 2 -o /dev/null "$surveillance" || true
+    else
+      curl -fsS -m 10 --retry 2 -o /dev/null "$surveillance/fail" || true
+    fi
+  fi
+
   # Après la collecte et non avant : une construction de vingt minutes ne doit
   # pas retarder le passage de la veille.
   echo "── $(date '+%F %T') mise à jour" >>"$log"

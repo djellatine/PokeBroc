@@ -303,6 +303,32 @@ doublons). Le site met une à deux minutes à répondre sur ce processeur.
   septembre 2026. Le signe qui ne trompe pas : `partial` dans
   `.data/feed/*.json` sur toutes les cartes (voir « La session Vinted »).
 
+## Tourner sans développeur
+
+Bilan du 1er octobre 2026, fait pour que le site tienne seul.
+
+**Ce qui se renouvelle tout seul** : la session Vinted (24 h, rouverte par
+`collect/vinted_session.py`), le laissez-passer Cloudflare de Cardmarket
+(~2 h), le jeton OAuth d'eBay (2 h), le quota eBay (espacé pour tenir les
+5 000 appels du jour), la date estimée des annonces Vinted (repère réappris à
+chaque recherche, `.data/vinted/repere.json`). Le cache d'images est plafonné
+à 300 Mo, les journaux purgés à 14 jours, les sauvegardes gardées 14 jours.
+
+**Ce qui prévient tout seul** : une source en panne plus de 45 min → message
+Discord avec le geste à faire, rappel quotidien, message au retour
+(`lib/health.ts`).
+
+**Ce qui demande une main humaine** :
+
+| Quand | Quoi |
+|---|---|
+| Une fois | Créer un contrôle sur healthchecks.io (gratuit), période 15 min, grâce 1 h, et coller son adresse dans `/root/PokeBroc/.env.local` : `SURVEILLANCE_URL=https://hc-ping.com/…`. Sans elle, une tablette éteinte ne prévient personne. |
+| Avant le 28 février 2027 | Console Tailscale → machine `tab-13` → « Disable key expiry ». Sinon l'accès distant tombe. |
+| Après chaque redémarrage | Ouvrir Tailscale, puis le bouton PokeBroc du widget (le démarrage automatique ne marche pas, voir plus haut). |
+| Message Discord « leboncoin » qui dure 3 jours | `pip install -U curl_cffi`, la commande est dans le message. |
+| Message « Vinted … ÉCHEC » qui dure | Vinted a changé son site : il faut un développeur. Rien d'autre à faire. |
+| Message « eBay » qui dure plus d'un jour | Vérifier les clés sur developer.ebay.com. |
+
 ## Ce qui reste à faire, et le contexte côté PC
 
 - **Cardmarket, premier passage** : Chromium (pas d'Edge en ARM64) devra

@@ -118,7 +118,9 @@ const REMEDIES: Record<HealthSource, string> = {
     "vérifier les clés sur developer.ebay.com (« Application Keys »).",
   lbc:
     "Leboncoin (Datadome) bloque parfois quelques heures, puis laisse repasser tout seul. Si ça dure plus d'un jour : " +
-    "bouton PokeBroc du widget, sur la tablette.",
+    "bouton PokeBroc du widget, sur la tablette. Plus de trois jours : Datadome reconnaît sans doute de vieilles " +
+    "empreintes de navigateur ; dans Termux, `proot-distro login debian -- /root/venv/bin/pip install -U curl_cffi`, " +
+    "puis le bouton PokeBroc.",
   cardmarket:
     "Cloudflare, le plus souvent : la tablette coche la case toute seule et ça revient. Si ça dure : " +
     "bouton PokeBroc du widget, sur la tablette.",
