@@ -1142,7 +1142,12 @@ Webhooks → Nouveau webhook**, puis **Copier l'URL**. La poser dans `.env.local
 
 ```
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/123.../abc...
+# Facultatif : les avis de panne dans un salon à part (« ERREUR »)
+DISCORD_ERREUR_WEBHOOK_URL=https://discord.com/api/webhooks/456.../def...
 ```
+
+Le second webhook sépare la technique des annonces : une source en panne, son rappel quotidien et
+son retour partent dans le salon « ERREUR » ; sans lui, dans le salon des alertes, comme avant.
 
 C'est tout — pas de compte à connecter, pas de code. La page **Alertes** du site montre le webhook
 comme branché et propose un **message de test** pour vérifier qu'il pointe sur le bon salon. Les

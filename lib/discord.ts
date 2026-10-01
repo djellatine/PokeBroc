@@ -8,6 +8,12 @@
  *
  * L'URL vit dans l'environnement (`DISCORD_WEBHOOK_URL`), comme le jetons eBay :
  * absente, la veille balaie sans alerter, et le site l'affiche sur `/alertes`.
+ *
+ * Les avis de panne (`sendNotice`) peuvent partir dans un autre salon,
+ * `DISCORD_ERREUR_WEBHOOK_URL` — demandé le 1er octobre 2026 : un salon
+ * « ERREUR » à part, pour qu'une panne ne se noie pas dans les annonces et que
+ * les annonces ne se mêlent pas de technique. Absente, tout part dans le salon
+ * des alertes, comme avant.
  */
 
 import { offerText, MAX_ALERTS, type AlertGroup } from "./alerts";
@@ -27,13 +33,22 @@ interface DiscordEmbed {
   thumbnail?: { url: string };
 }
 
-export function webhookUrl(): string | null {
-  const url = process.env.DISCORD_WEBHOOK_URL?.trim();
+function validWebhook(value: string | undefined): string | null {
+  const url = value?.trim();
   // Un webhook Discord a une forme fixe ; refuser tout le reste évite de POSTer
   // des alertes vers une URL collée de travers.
   return url && /^https:\/\/(discord|discordapp)\.com\/api\/webhooks\/\d+\/\S+$/.test(url)
     ? url
     : null;
+}
+
+export function webhookUrl(): string | null {
+  return validWebhook(process.env.DISCORD_WEBHOOK_URL);
+}
+
+/** Salon des avis de panne, à défaut celui des alertes. */
+export function errorWebhookUrl(): string | null {
+  return validWebhook(process.env.DISCORD_ERREUR_WEBHOOK_URL) ?? webhookUrl();
 }
 
 export function isConfigured(): boolean {
@@ -212,7 +227,7 @@ export async function sendAlerts(
  * `lib/health.ts`. Rend l'erreur plutôt que de lever.
  */
 export async function sendNotice(content: string): Promise<{ ok: boolean; error?: string }> {
-  const url = webhookUrl();
+  const url = errorWebhookUrl();
   if (!url) return { ok: false, error: "DISCORD_WEBHOOK_URL absent" };
   try {
     const response = await fetch(url, {
