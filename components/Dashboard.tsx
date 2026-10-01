@@ -366,9 +366,10 @@ export default function Dashboard({
       }
     }
 
-    // Vinted ne date plus ses annonces : la date est estimée d'après
-    // l'identifiant (`lib/vinted-date.ts`), et posée sur l'annonce pour que la
-    // vignette affiche le même âge que celui sur lequel le fil trie.
+    // Vinted ne date plus ses annonces : `lib/vinted.ts` estime la date d'après
+    // l'identifiant dès la collecte. Les instantanés écrits avant n'en ont pas,
+    // d'où la même estimation ici — posée sur l'annonce pour que la vignette
+    // affiche l'âge sur lequel le fil trie.
     const latest = latestVinted(best.values());
     for (const [id, item] of best) {
       if (item.createdAt === null) best.set(id, { ...item, createdAt: postedAt(item, latest) });

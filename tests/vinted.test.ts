@@ -49,12 +49,20 @@ describe("mapVintedItem", () => {
     assert.equal(item.seller.business, false);
   });
 
-  it("n'invente pas de date : le catalogue n'en donne plus", () => {
-    assert.equal(mapVintedItem(raw()).createdAt, null);
+  it("lit la date de la photo quand elle est là", () => {
     const dated = raw({
       photo: { url: "x", thumbnails: [], high_resolution: { timestamp: 1_700_000_000 } },
     });
     assert.equal(mapVintedItem(dated).createdAt, 1_700_000_000_000);
+  });
+
+  it("estime sinon la date d'après l'identifiant, jamais dans le futur", () => {
+    const now = Date.UTC(2026, 9, 1, 18);
+    // Identifiant d'avril 2025 : une vieille annonce reste vieille.
+    const old = mapVintedItem(raw({ id: 6076111080 }), now).createdAt ?? 0;
+    assert.ok(now - old > 400 * 24 * 60 * 60 * 1000);
+    // Identifiant au-delà de tout repère : plafonné à maintenant.
+    assert.equal(mapVintedItem(raw({ id: 99_000_000_000 }), now).createdAt, now);
   });
 
   it("préfère les anciens champs de marque et d'état s'ils reviennent", () => {

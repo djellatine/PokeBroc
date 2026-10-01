@@ -591,6 +591,13 @@ défaut du tableau de bord
 plutôt qu'en inventer d'autres est la seule façon qu'une alerte ne mène pas à une page où l'annonce
 annoncée est justement filtrée — et un lien qui ne montre rien décrédibilise le suivant.
 
+Une condition de plus, propre aux alertes : l'annonce doit avoir été **mise en ligne** moins de trois
+jours avant le repère (`MAX_POST_AGE_MS`), pas seulement apparue chez nous. Le 1er octobre 2026, la
+veille a envoyé 200 alertes d'un coup au retour de Vinted, et 20 à 50 à chaque carte ajoutée : tout
+ce que la collecte croisait pour la première fois partait comme neuf, y compris des annonces de
+quinze mois. Trois jours couvrent une panne de week-end et l'imprécision de la date Vinted, estimée
+d'après l'identifiant (voir plus bas).
+
 La règle vit dans `lib/alerts.ts`, pas dans le script : c'est une décision métier, elle se teste sans
 réseau (`tests/alerts.test.ts`). La mise en forme et l'envoi vers Discord vivent à part, dans
 `lib/discord.ts`.
@@ -860,8 +867,12 @@ fois passaient pour neuves, et « Derniers ajouts » s'ouvrait sur des annonces 
 date est désormais **estimée d'après l'identifiant** (`lib/vinted-date.ts`) : les identifiants
 Vinted croissent avec le temps — sur 352 annonces datées, deux seulement s'écartaient de plus d'un
 mois de leur ordre —, et une interpolation entre quelques repères date une annonce à quelques jours
-près. L'annonce Vinted au plus grand identifiant sert de repère frais, pour que l'extrapolation ne
-dérive pas au fil des mois ; l'estimation n'est jamais postérieure à `firstSeen`. La marque et l'état, eux, ont migré dans les deux lignes de la vignette
+près. L'estimation est faite à la collecte, dans `lib/vinted.ts`, si bien que tout en profite : le
+fil, la troncature à `MAX_PER_CARD` (qui départage à date égale et coupait d'abord Vinted), les
+lots (triés puis tronqués à deux cents), la recherche et les alertes. Le haut de chaque recherche
+`newest_first` sert de repère frais, conservé dans `.data/vinted/repere.json`, pour que
+l'extrapolation au-delà des repères écrits ne dérive pas au fil des mois ; l'estimation n'est
+jamais dans le futur. La marque et l'état, eux, ont migré dans les deux lignes de la vignette
 (`item_box`), et les liens sont devenus relatifs.
 
 ### Pourquoi leboncoin passe par un script Python

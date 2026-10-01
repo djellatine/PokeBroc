@@ -21,7 +21,8 @@ import { execFile } from "node:child_process";
 import { stat } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import { DATA_DIR, readJson } from "./json-file";
+import { DATA_DIR, readJson, writeJson } from "./json-file";
+import { vintedIdTime } from "./vinted-date";
 
 const HOST = "https://www.vinted.fr";
 const CATALOGUE = "https://api.vinted.fr/svc-catalogue/items";
@@ -80,9 +81,10 @@ export interface VintedItem {
   /**
    * Mise en ligne, en millisecondes epoch. Vinted n'expose pas de date de
    * création dans son catalogue ; l'ancien en donnait une par l'horodatage de
-   * la photo, le nouveau (septembre 2026) ne le porte plus. On la lit si elle
-   * revient, et l'on s'en passe sinon : le tri « nouveautés » repose sur
-   * `newest_first` côté Vinted et sur `firstSeen` côté fil.
+   * la photo, le nouveau (septembre 2026) ne le porte presque plus. Faute de
+   * mieux, elle est estimée d'après l'identifiant — voir `lib/vinted-date.ts`.
+   * Toujours renseignée, donc : `null` ne sert qu'à garder le type commun aux
+   * autres places de marché.
    */
   createdAt: number | null;
   seller: { login: string | null; url: string | null; business: boolean };
@@ -354,7 +356,16 @@ function text(value: string | null | undefined): string | null {
   return trimmed ? trimmed : null;
 }
 
-export function mapVintedItem(raw: RawVintedItem): VintedItem {
+/**
+ * @param now       Plafond de la date estimée : une annonce n'est pas mise en
+ *                  ligne dans le futur.
+ * @param freshest  Repère frais pour l'estimation, voir `freshestAnchor`.
+ */
+export function mapVintedItem(
+  raw: RawVintedItem,
+  now = Date.now(),
+  freshest: readonly [number, number] | null = null,
+): VintedItem {
   const thumbs = raw.photo?.thumbnails ?? [];
   const thumb =
     thumbs.find((t) => t.type === "thumb310x430")?.url ??
@@ -378,7 +389,7 @@ export function mapVintedItem(raw: RawVintedItem): VintedItem {
     favourites: raw.favourite_count ?? 0,
     views: raw.view_count ?? 0,
     promoted: Boolean(raw.promoted),
-    createdAt: uploadedAt(raw),
+    createdAt: uploadedAt(raw) ?? Math.min(vintedIdTime(raw.id, freshest), now),
     seller: {
       login: raw.user?.login ?? null,
       url:
@@ -417,6 +428,39 @@ async function call(url: string, current: Session): Promise<Response> {
     cache: "no-store",
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
+}
+
+/* ------------------------------------------------------ repère de datation */
+
+/**
+ * Annonce la plus récente qu'on ait vue, `[identifiant, date]` : le repère qui
+ * empêche l'estimation par l'identifiant de dériver au-delà des repères écrits
+ * dans `lib/vinted-date.ts`. Tiré du haut des recherches `newest_first`, qui
+ * remontent des annonces vieilles de quelques minutes, et conservé sur disque
+ * pour que la veille — un processus à part, relancé à chaque passage — en
+ * profite aussi.
+ */
+const ANCHOR_FILE = path.join(DATA_DIR, "vinted", "repere.json");
+let freshest: [number, number] | null = null;
+let freshestRead = false;
+
+async function freshestAnchor(): Promise<[number, number] | null> {
+  if (!freshestRead) {
+    freshestRead = true;
+    const stored = await readJson<{ id: number; at: number }>(ANCHOR_FILE);
+    if (stored && Number.isFinite(stored.id) && Number.isFinite(stored.at)) {
+      if (!freshest || stored.id > freshest[0]) freshest = [stored.id, stored.at];
+    }
+  }
+  return freshest;
+}
+
+async function learnAnchor(items: RawVintedItem[], now: number): Promise<void> {
+  const top = Math.max(0, ...items.map((item) => item.id).filter(Number.isFinite));
+  if (top === 0 || (freshest && top <= freshest[0])) return;
+  freshest = [top, now];
+  // Au mieux : un repère perdu se réapprend au passage suivant.
+  await writeJson(ANCHOR_FILE, { id: top, at: now }).catch(() => {});
 }
 
 export async function searchVinted(params: VintedSearchParams): Promise<VintedSearchResult> {
@@ -462,9 +506,16 @@ export async function searchVinted(params: VintedSearchParams): Promise<VintedSe
       };
     };
 
+    const now = Date.now();
+    const rawItems = json.items ?? [];
+    await freshestAnchor();
+    if (params.order === "newest_first" && (params.page ?? 1) === 1) {
+      await learnAnchor(rawItems, now);
+    }
+
     const pagination = json.pagination ?? {};
     return {
-      items: (json.items ?? []).map(mapVintedItem),
+      items: rawItems.map((raw) => mapVintedItem(raw, now, freshest)),
       total: pagination.total_entries ?? 0,
       page: pagination.current_page ?? 1,
       totalPages: pagination.total_pages ?? 0,

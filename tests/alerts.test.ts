@@ -70,6 +70,16 @@ describe("selectFresh", () => {
     assert.equal(selectFresh([item({ firstSeen: NOW })], NOW).length, 0);
   });
 
+  it("n'annonce pas une vieille annonce que la collecte croise pour la première fois", () => {
+    // Retour de Vinted le 1er octobre 2026 : 200 alertes, dont des annonces de quinze mois.
+    const old = item({ id: "lbc:1", createdAt: NOW - 450 * 24 * 60 * 60 * 1000, firstSeen: NOW });
+    const recent = item({ id: "lbc:2", createdAt: NOW - 60 * 60 * 1000, firstSeen: NOW });
+    assert.deepEqual(
+      selectFresh([old, recent], NOW - 1000).map((entry) => entry.id),
+      ["lbc:2"],
+    );
+  });
+
   it("écarte les correspondances faibles, qui parlent d'une autre carte", () => {
     assert.equal(selectFresh([item({ score: 5 })], 0).length, 0);
   });
