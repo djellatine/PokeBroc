@@ -854,9 +854,14 @@ deviner par l'horodatage de la photo ; le nouveau ne le porte plus. `createdAt` 
 Vinted — le tri « nouveautés » repose sur `newest_first` côté Vinted et sur `firstSeen` côté fil,
 qui n'en a jamais dépendu. Le tri « Derniers ajouts » de l'accueil, lui, en dépendait : une annonce
 sans date y valait zéro, et le 1er octobre les 1 760 annonces Vinted non datées (sur 2 115) passaient
-toutes sous leboncoin et eBay — l'accueil semblait n'avoir plus de Vinted. Il retombe désormais sur
-`firstSeen`, jamais antérieur à la mise en ligne et juste au quart d'heure près pour une annonce
-neuve. Contrecoup assumé : après une panne, les annonces retrouvées remontent en tête un moment. La marque et l'état, eux, ont migré dans les deux lignes de la vignette
+toutes sous leboncoin et eBay — l'accueil semblait n'avoir plus de Vinted. Se replier sur
+`firstSeen` a été essayé et retiré le jour même : les vieilles annonces croisées pour la première
+fois passaient pour neuves, et « Derniers ajouts » s'ouvrait sur des annonces de quinze mois. La
+date est désormais **estimée d'après l'identifiant** (`lib/vinted-date.ts`) : les identifiants
+Vinted croissent avec le temps — sur 352 annonces datées, deux seulement s'écartaient de plus d'un
+mois de leur ordre —, et une interpolation entre quelques repères date une annonce à quelques jours
+près. L'annonce Vinted au plus grand identifiant sert de repère frais, pour que l'extrapolation ne
+dérive pas au fil des mois ; l'estimation n'est jamais postérieure à `firstSeen`. La marque et l'état, eux, ont migré dans les deux lignes de la vignette
 (`item_box`), et les liens sont devenus relatifs.
 
 ### Pourquoi leboncoin passe par un script Python
@@ -1426,6 +1431,7 @@ lib/
   bulbapedia.ts             second catalogue japonais : pages d'espèce et de carte de Bulbapedia
   pokedex-names.ts          table des espèces (ja, fr, en), générée depuis PokéAPI
   vinted.ts                 catalogue Vinted : session lue sur disque, throttle, cache, normalisation
+  vinted-date.ts            date des annonces Vinted estimée par l'identifiant (le catalogue n'en donne plus)
   lbc.ts                    lots et cartes leboncoin (aucune requête : voir collect/)
   match.ts                  notation des annonces, état, requêtes, vocabulaires éliminatoires
   format.ts                 euros, pourcentages, ancienneté

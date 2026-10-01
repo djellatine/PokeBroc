@@ -19,6 +19,7 @@ import type { FeedCard, FeedItem, Snapshot } from "@/lib/feed";
 import { percent, plural } from "@/lib/format";
 import { isForeignListing } from "@/lib/language";
 import { STRONG_SCORE, WIDE_SCORE } from "@/lib/match";
+import { latestVinted, postedAt } from "@/lib/vinted-date";
 import type { FavoriteCard } from "@/lib/store";
 
 /**
@@ -365,6 +366,14 @@ export default function Dashboard({
       }
     }
 
+    // Vinted ne date plus ses annonces : la date est estimée d'après
+    // l'identifiant (`lib/vinted-date.ts`), et posée sur l'annonce pour que la
+    // vignette affiche le même âge que celui sur lequel le fil trie.
+    const latest = latestVinted(best.values());
+    for (const [id, item] of best) {
+      if (item.createdAt === null) best.set(id, { ...item, createdAt: postedAt(item, latest) });
+    }
+
     let wideOnly = 0;
     let foreign = 0;
     let byHand = 0;
@@ -405,16 +414,10 @@ export default function Dashboard({
 
     const scoped = selected ? kept.filter((item) => item.cardId === selected) : kept;
 
-    // Le nouveau catalogue Vinted ne donne plus de date de mise en ligne, sauf
-    // quand la photo porte un horodatage — mesuré le 1er octobre, 1 760
-    // annonces Vinted sur 2 115 sans date. Triées à 0, elles tombaient toutes
-    // sous leboncoin et eBay, et l'accueil semblait n'avoir plus de Vinted. À
-    // défaut, la date où nous l'avons croisée : jamais antérieure à la mise en
-    // ligne, et juste à un quart d'heure près pour une annonce neuve.
-    const postedAt = (item: FeedItem) => item.createdAt ?? item.firstSeen;
     const sorted = [...scoped].sort((a, b) => {
-      if (filters.sort === "date") return postedAt(b) - postedAt(a);
-      if (filters.sort === "oldest") return postedAt(a) - postedAt(b);
+      if (filters.sort === "date") return (b.createdAt ?? 0) - (a.createdAt ?? 0);
+      // Sans date connue, en dernier : une annonce sans date n'est pas ancienne.
+      if (filters.sort === "oldest") return (a.createdAt ?? Infinity) - (b.createdAt ?? Infinity);
       if (filters.sort === "price") {
         return (a.totalPrice ?? a.price ?? Infinity) - (b.totalPrice ?? b.price ?? Infinity);
       }
