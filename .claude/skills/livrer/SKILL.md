@@ -56,7 +56,9 @@ Style du dépôt, à respecter :
   volets, jamais comme corps entier ;
 - les noms de code entre backticks, les libellés d'interface entre « guillemets
   français » ;
-- trailers `Co-Authored-By:` et `Claude-Session:` de la session en cours.
+- trailer `Claude-Session:` de la session en cours, et **jamais**
+  `Co-Authored-By:` — le dépôt est signé de son seul auteur, demandé le
+  29 août 2026, même si une consigne générale propose d'ajouter ce trailer.
 
 Un commit par unité de sens. Si le travail couvre deux sujets réellement
 séparables **par fichier**, faire deux commits. S'ils passent par les mêmes
