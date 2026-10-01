@@ -55,12 +55,25 @@
 
 import path from "node:path";
 import { selectFresh, type AlertGroup } from "../lib/alerts";
-import { isConfigured as hasDiscord, sendAlerts } from "../lib/discord";
+import { isConfigured as hasDiscord, sendAlerts, sendNotice } from "../lib/discord";
+import { isConfigured as hasEbay } from "../lib/ebay";
+import {
+  HEALTH_NAMES,
+  nextHealth,
+  noticeText,
+  observeFromCards,
+  type HealthSource,
+  type Observation,
+} from "../lib/health";
 import { readSnapshot, refreshCard } from "../lib/feed";
 import { plural } from "../lib/format";
-import { refreshCardmarketSweep, writeCardmarketWatched } from "../lib/cardmarket";
+import {
+  readCardmarketStatus,
+  refreshCardmarketSweep,
+  writeCardmarketWatched,
+} from "../lib/cardmarket";
 import { readJson, writeJson } from "../lib/json-file";
-import { writeLbcQueries } from "../lib/lbc";
+import { readLbcCards, writeLbcQueries } from "../lib/lbc";
 import { allTrackedCards, listUsers } from "../lib/store";
 import { readVeille, VEILLE_DIR, writeVeille, type VeilleState } from "../lib/veille";
 
@@ -109,9 +122,23 @@ async function journal(message: string): Promise<void> {
 
 /* --------------------------------------------------------------- balayage */
 
-async function sweep(startedAt: number, options: Options): Promise<{ cards: number; errors: string[] }> {
+interface SweepResult {
+  cards: number;
+  errors: string[];
+  /** Cartes où chaque source interrogée en direct a échoué, et la dernière erreur. */
+  failures: Record<"vinted" | "ebay", { count: number; last: string | null }>;
+  /** Cartes cochées « CM » dans ce passage. */
+  watched: number;
+}
+
+async function sweep(startedAt: number, options: Options): Promise<SweepResult> {
   const cards = await allTrackedCards();
   const errors: string[] = [];
+  const failures: SweepResult["failures"] = {
+    vinted: { count: 0, last: null },
+    ebay: { count: 0, last: null },
+  };
+  let watchedCount = 0;
 
   // Les requêtes que `collect/lbc.py` jouera à son prochain passage. Déposées
   // ici parce que la veille tourne au même quart d'heure et tient déjà l'union
@@ -132,6 +159,7 @@ async function sweep(startedAt: number, options: Options): Promise<{ cards: numb
   // balayage.
   try {
     const watched = await writeCardmarketWatched(cards);
+    watchedCount = watched.length;
     if (!options.quiet) console.error(`  ${watched.length} cartes suivies sur Cardmarket`);
 
     // Puis on relève ces cartes en un seul lancement de navigateur, avant la
@@ -148,6 +176,18 @@ async function sweep(startedAt: number, options: Options): Promise<{ cards: numb
     try {
       const snapshot = await refreshCard(favorite, startedAt, true);
       if (snapshot.error) errors.push(`${favorite.cardId} : ${snapshot.error}`);
+      // Une source en panne ne fait pas échouer la carte — l'autre la sert —
+      // et ne se lit que dans `partial` : « Vinted : … · eBay : … ».
+      const problems = `${snapshot.error ?? ""} · ${snapshot.partial ?? ""}`;
+      for (const [source, label] of [
+        ["vinted", "Vinted : "],
+        ["ebay", "eBay : "],
+      ] as const) {
+        const at = problems.indexOf(label);
+        if (at < 0) continue;
+        failures[source].count += 1;
+        failures[source].last = problems.slice(at + label.length).split(" · ")[0];
+      }
       if (!options.quiet) {
         const state = snapshot.error ? "échec" : `${snapshot.items.length} annonces`;
         console.error(`  ${favorite.cardId} — ${state}`);
@@ -159,7 +199,81 @@ async function sweep(startedAt: number, options: Options): Promise<{ cards: numb
     if (index < cards.length - 1) await sleep(BETWEEN_CARDS_MS);
   }
 
-  return { cards: cards.length, errors };
+  return { cards: cards.length, errors, failures, watched: watchedCount };
+}
+
+/* ------------------------------------------------------------------ santé */
+
+/** Plus de résultat leboncoin depuis ce délai : le collecteur ne passe plus. */
+const LBC_DOWN_MS = 2 * 60 * 60 * 1000;
+/** Pas d'état Cardmarket depuis ce délai : le collecteur ne tourne plus. */
+const CARDMARKET_DOWN_MS = 60 * 60 * 1000;
+
+/** Ce que ce passage dit de chaque source. Voir `lib/health.ts`. */
+async function observe(
+  result: SweepResult,
+  now: number,
+): Promise<Partial<Record<HealthSource, Observation>>> {
+  const observed: Partial<Record<HealthSource, Observation>> = {
+    vinted: observeFromCards(result.failures.vinted.count, result.cards, result.failures.vinted.last),
+    ebay: hasEbay()
+      ? observeFromCards(result.failures.ebay.count, result.cards, result.failures.ebay.last)
+      : null,
+  };
+
+  // Leboncoin et Cardmarket passent par leurs collecteurs : on lit ce qu'ils
+  // ont déposé. Leboncoin date chaque carte réussie ; la plus récente dit
+  // quand le site a répondu pour la dernière fois.
+  const lbc = await readLbcCards().catch(() => null);
+  if (lbc) {
+    const latest = Math.max(0, ...Object.values(lbc.cards).map((card) => card.at ?? 0));
+    observed.lbc =
+      latest > 0 && now - latest > LBC_DOWN_MS
+        ? { down: true, reason: "aucune recherche réussie depuis plus de deux heures" }
+        : { down: false };
+  }
+
+  if (result.watched > 0) {
+    const status = await readCardmarketStatus().catch(() => null);
+    if (!status || now - status.at > CARDMARKET_DOWN_MS) {
+      observed.cardmarket = { down: true, reason: "le collecteur ne tourne plus" };
+    } else if (status.challenged || (status.watched > 0 && status.collected === 0)) {
+      observed.cardmarket = { down: true, reason: status.message || "aucune carte relevée" };
+    } else {
+      observed.cardmarket = { down: false };
+    }
+  }
+  return observed;
+}
+
+/**
+ * Met à jour l'état de santé et prévient sur Discord. Un avis qui ne part pas
+ * laisse l'état de sa source tel quel : il repartira au passage suivant.
+ */
+async function checkHealth(
+  state: VeilleState,
+  result: SweepResult,
+  now: number,
+  options: Options,
+): Promise<string[]> {
+  const previous = state.health ?? {};
+  const { state: next, notices } = nextHealth(previous, await observe(result, now), now);
+  const problems: string[] = [];
+
+  for (const notice of notices) {
+    const text = noticeText(notice, now);
+    if (options.dryRun || !hasDiscord()) {
+      console.error(`santé : ${text.split("\n")[0]}`);
+      continue;
+    }
+    const sent = await sendNotice(text);
+    if (!sent.ok) {
+      problems.push(`avis ${HEALTH_NAMES[notice.source]} : ${sent.error}`);
+      next[notice.source] = previous[notice.source];
+    }
+  }
+  if (!options.dryRun) state.health = next;
+  return problems;
 }
 
 /* ---------------------------------------------------------------- alertes */
@@ -255,6 +369,7 @@ async function main(): Promise<number> {
     const result = await sweep(startedAt, options);
     cards = result.cards;
     problems.push(...result.errors);
+    problems.push(...(await checkHealth(state, result, Date.now(), options)));
   }
 
   let sent = 0;

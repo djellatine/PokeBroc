@@ -208,6 +208,30 @@ export async function sendAlerts(
 }
 
 /**
+ * Un message de texte seul — l'avis de panne d'une source, voir
+ * `lib/health.ts`. Rend l'erreur plutôt que de lever.
+ */
+export async function sendNotice(content: string): Promise<{ ok: boolean; error?: string }> {
+  const url = webhookUrl();
+  if (!url) return { ok: false, error: "DISCORD_WEBHOOK_URL absent" };
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: "PokeBroc",
+        content: content.slice(0, 2000),
+        allowed_mentions: { parse: [] },
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    return response.ok ? { ok: true } : { ok: false, error: `HTTP ${response.status}` };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Discord injoignable." };
+  }
+}
+
+/**
  * Un mot de test, pour vérifier que le webhook pointe bien où il faut depuis la
  * page Alertes. Rend l'erreur plutôt que de lever.
  */

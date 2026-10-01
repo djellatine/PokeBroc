@@ -28,6 +28,7 @@
  */
 
 import path from "node:path";
+import type { HealthState } from "./health";
 import { DATA_DIR, readJson, serialize, writeJson } from "./json-file";
 
 /** Doit rester identique au chemin qu'écrit `collect/veille.ts`. */
@@ -49,6 +50,8 @@ export interface VeilleState {
   at?: number;
   /** Résumé du dernier passage, tel que la page Alertes l'affiche. */
   summary?: string;
+  /** Pannes en cours des places de marché — voir `lib/health.ts`. */
+  health?: HealthState;
 }
 
 const EMPTY: VeilleState = {};

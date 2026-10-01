@@ -609,6 +609,27 @@ visite — elles portent la pastille « nouveau » — mais seule la veille aler
 développement sur un autre poste montre donc des nouveautés sans jamais rien envoyer, et ce n'est
 pas la tablette qui a oublié.
 
+### Une source en panne prévient aussi
+
+La veille n'alertait que sur les annonces. Une place de marché en panne ne faisait rien remarquer :
+le fil note l'échec carte par carte (`partial`), mais la veille ne le comptait pas. Du 30 septembre
+au 1er octobre 2026, Vinted n'a rien rendu pendant un jour entier, et le journal affichait
+« 68 cartes balayées, 0 alerte » à chaque passage. En septembre, la panne avait duré une semaine.
+Les deux fois, elle a été découverte par hasard.
+
+À chaque passage, la veille fait donc aussi le point sur chaque source (`lib/health.ts`) :
+- Vinted et eBay sont en panne s'ils échouent sur au moins la moitié des cartes du passage ;
+- leboncoin l'est si aucune recherche n'a réussi depuis deux heures ;
+- Cardmarket l'est, quand des cartes sont cochées « CM », si son collecteur se tait depuis une heure,
+  bute sur Cloudflare ou ne relève rien.
+
+Une panne qui dure trois quarts d'heure (une coupure réseau de cinq minutes ne dit rien) envoie un
+message sur le salon Discord des alertes. Il dit ce qui manque et ce qu'on peut faire seul. Pour
+Vinted, c'est la commande exacte à taper dans Termux. La veille rappelle ensuite la panne une fois
+par jour, pas à chaque passage, et prévient quand la source refonctionne. L'état des pannes vit dans
+`.data/veille/state.json` (`health`). Ce que cela ne couvre pas : la tablette éteinte. Il n'y a
+alors plus de veille pour rien dire, voir « Limites connues ».
+
 ### Deux processus, un seul écrivain par fichier
 
 `store.ts` sérialise ses écritures **en mémoire**, ce qui ne protège de rien entre deux processus :
@@ -1389,7 +1410,8 @@ lib/
   format.ts                 euros, pourcentages, ancienneté
   alerts.ts                 ce qu'une alerte retient, et comment elle se lit
   discord.ts                alertes Discord : webhook, embeds, envoi
-  veille.ts                 état de la veille (repère des alertes)
+  veille.ts                 état de la veille (repère des alertes, pannes en cours)
+  health.ts                 pannes des places de marché : quand prévenir, quoi dire
 collect/
   lbc.py                    collecteur leboncoin — lots, puis une tranche des cartes suivies
   test_lbc.py               ses tests, sans réseau
@@ -1416,6 +1438,13 @@ tests/                      node:test — match, japanese, bulbapedia, tcgdex, c
 
 ## Limites connues
 
+- **La tablette ne relance pas PokeBroc après un redémarrage.** La surcouche Blackview empêche
+  Termux:Boot de démarrer : `~/boot-temoin.txt` n'a jamais été écrit (vérifié le 1er octobre 2026).
+  Après une mise à jour Android ou une batterie vide, le site, la veille et les collecteurs restent
+  arrêtés jusqu'à ce qu'on appuie sur le bouton PokeBroc du widget. La tablette a ainsi redémarré le
+  29 septembre, et les sauvegardes du 28 et du 29 manquent. Une tablette éteinte ne peut rien
+  signaler : seul un témoin extérieur (un service qui s'inquiète de ne plus recevoir de signe) le
+  pourrait.
 - La cote Cardmarket correspond à la version standard de la carte : une version gradée PSA 10 ou
   1st edition affichera un écart très positif. Les gradées sont donc masquées par défaut, d'un clic
   près.
