@@ -437,6 +437,23 @@ positionnée en pertinence, donc la condition d'un badge « nouveau » fiable.
 La date vient de `photo.high_resolution.timestamp` : le catalogue Vinted n'expose pas de date de
 création, et l'horodatage de la photo en est le meilleur équivalent.
 
+### eBay a un quota, et la veille le tient
+
+L'API eBay accorde 5 000 appels par jour. La veille cherchait chaque carte sur eBay à chaque quart
+d'heure, deux appels par carte : 68 cartes × 2 × 96 passages, environ 13 000 appels par jour. Le
+1er octobre 2026, le quota tombait vers 19 h (« Quota eBay atteint »), et eBay restait muet
+jusqu'à sa remise à zéro, minuit heure du Pacifique, 9 h à Paris. C'est la surveillance des sources
+qui l'a fait voir, à son premier passage.
+
+Une carte n'est donc cherchée sur eBay que lorsqu'elle y est due (`ebayInterval`). Le rythme est
+calculé pour que les collectes automatiques tiennent dans 4 000 appels par jour : toutes les
+49 minutes pour 68 cartes, toutes les 1 h 48 pour 150. Les 1 000 qui restent couvrent « Actualiser »
+et les cartes qu'on ajoute. Entre deux recherches, et quand eBay échoue, la carte garde ses
+annonces eBay de la recherche précédente, moins les enchères terminées. « Actualiser » relance eBay
+pour toute carte cherchée il y a plus d'un quart d'heure : un clic interroge les 68 cartes d'un
+coup, et cinq clics rapprochés auraient mangé la marge du jour. Vinted, sans quota, reste
+interrogé à chaque passage.
+
 ## Le fil est un cache, pas une recherche
 
 Chaque chargement de page relançait une recherche Vinted par carte, sérialisées à 350 ms : vingt

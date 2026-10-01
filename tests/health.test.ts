@@ -78,3 +78,16 @@ describe("noticeText", () => {
     assert.ok(text.length < 2000);
   });
 });
+
+describe("ebayInterval", () => {
+  it("tient le budget quotidien d'eBay, quel que soit le nombre de cartes", async () => {
+    const { ebayInterval, EBAY_DAILY_BUDGET } = await import("../lib/feed.ts");
+    const day = 24 * 60 * 60 * 1000;
+    for (const cards of [10, 68, 150]) {
+      const calls = (day / ebayInterval(cards)) * cards * 2;
+      assert.ok(calls <= EBAY_DAILY_BUDGET + 1, `${cards} cartes : ${calls} appels`);
+    }
+    assert.equal(ebayInterval(1), 15 * 60 * 1000, "jamais plus souvent que la veille");
+    assert.equal(Math.round(ebayInterval(68) / 60_000), 49);
+  });
+});

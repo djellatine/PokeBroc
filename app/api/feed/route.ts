@@ -50,7 +50,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const snapshot = await refreshCard(favorite, Date.now(), force);
+    const snapshot = await refreshCard(favorite, Date.now(), force, force);
     return Response.json(snapshot, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("[api/feed]", error);

@@ -32,7 +32,7 @@ import {
   type Scored,
 } from "./match";
 import { recordSightings } from "./sightings";
-import type { FavoriteCard } from "./store";
+import { allTrackedCards, type FavoriteCard } from "./store";
 import { loadCard } from "./card-cache";
 import type { CardDetail } from "./tcgdex";
 import { searchVinted, type VintedItem } from "./vinted";
@@ -130,6 +130,14 @@ export interface Snapshot {
    * valide — `isFresh` le laisse donc passer — mais incomplet, et le fil le dit.
    */
   partial?: string;
+  /**
+   * Dernière recherche eBay réussie pour cette carte. eBay n'est pas
+   * interrogé à chaque collecte — voir `ebayInterval` — et ses annonces sont
+   * reprises de l'instantané précédent dans l'intervalle.
+   */
+  ebayAt?: number;
+  /** Sources interrogées pour de bon par cette collecte : la veille en tire la santé d'eBay. */
+  checked?: Source[];
 }
 
 function file(cardId: string): string {
@@ -336,6 +344,46 @@ async function collect(
 }
 
 /**
+ * Appels eBay que les collectes automatiques s'autorisent par jour, sur les
+ * 5 000 du quota. Le reste couvre « Actualiser » et les cartes qu'on ajoute.
+ *
+ * Mesuré le 1er octobre 2026 : la veille interrogeait eBay deux fois par
+ * carte à chaque quart d'heure, 68 cartes × 2 × 96 passages, soit environ
+ * 13 000 appels par jour. Le quota tombait vers 19 h, et eBay restait muet
+ * jusqu'à sa remise à zéro, minuit heure du Pacifique, 9 h à Paris.
+ */
+export const EBAY_DAILY_BUDGET = 4000;
+/** Appels eBay d'une collecte : `best_match` et `newly_listed`. */
+const EBAY_CALLS_PER_REFRESH = 2;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Délai entre deux recherches eBay d'une même carte, pour tenir le budget :
+ * 68 cartes, une fois toutes les 49 minutes ; 150, toutes les 1 h 48. Jamais
+ * moins d'un quart d'heure, le rythme de la veille.
+ */
+export function ebayInterval(cards: number): number {
+  return Math.max(EBAY_MIN_INTERVAL_MS, (cards * EBAY_CALLS_PER_REFRESH * DAY_MS) / EBAY_DAILY_BUDGET);
+}
+
+/**
+ * Plancher, y compris pour « Actualiser » : un clic relance toutes les cartes
+ * d'un coup, 136 appels eBay pour 68 cartes. Cinq clics rapprochés auraient
+ * mangé la marge du jour pour rien.
+ */
+const EBAY_MIN_INTERVAL_MS = 15 * 60 * 1000;
+
+let tracked: { at: number; count: number } | null = null;
+
+/** Nombre de cartes suivies, relu au plus toutes les dix minutes. */
+async function trackedCount(now: number): Promise<number> {
+  if (tracked && now - tracked.at < 10 * 60 * 1000) return tracked.count;
+  const count = (await allTrackedCards().catch(() => [])).length;
+  tracked = { at: now, count };
+  return count;
+}
+
+/**
  * Relance la collecte pour une carte et réécrit son instantané.
  *
  * Sérialisé par carte : deux visiteurs arrivant en même temps sur une carte
@@ -353,6 +401,8 @@ export async function refreshCard(
   favorite: FavoriteCard,
   now = Date.now(),
   force = false,
+  /** Le bouton « Actualiser » : eBay dès le plancher d'un quart d'heure, sans attendre `ebayInterval`. */
+  ebayNow = false,
 ): Promise<Snapshot> {
   return serialize(`feed:${favorite.cardId}`, async () => {
     const existing = await readSnapshot(favorite.cardId);
@@ -400,10 +450,29 @@ export async function refreshCard(
     // partie : il ne coûte aucune requête ici — il relit ce que la minuterie a
     // déposé — et rend une liste vide quand la carte n'a pas encore eu son
     // tour, ce qui n'est pas une erreur.
-    const sources: Source[] = hasEbay() ? ["vinted", "ebay", "lbc"] : ["vinted", "lbc"];
+    //
+    // eBay, compté, n'est interrogé que si la carte y est due — voir
+    // `ebayInterval`. Sinon, et quand il échoue, ses annonces précédentes sont
+    // reprises : une carte ne perd pas ses offres eBay entre deux recherches.
+    const ebayDue =
+      hasEbay() &&
+      (!existing?.ebayAt ||
+        now - existing.ebayAt >=
+          (ebayNow ? EBAY_MIN_INTERVAL_MS : ebayInterval(await trackedCount(now))));
+    const sources: Source[] = ebayDue ? ["vinted", "ebay", "lbc"] : ["vinted", "lbc"];
     const collected = await Promise.all(
       sources.map((source) => collect(source, card, query, force)),
     );
+    const ebayFailed = ebayDue && collected[sources.indexOf("ebay")].error !== null;
+    const ebayAt = ebayDue && !ebayFailed ? now : existing?.ebayAt;
+    // `firstSeen` suit l'annonce sans dommage : il est réécrit plus bas,
+    // depuis le registre des apparitions.
+    const reused: PendingItem[] =
+      hasEbay() && (!ebayDue || ebayFailed)
+        ? (existing?.items ?? []).filter(
+            (item) => item.source === "ebay" && !(item.endsAt !== null && item.endsAt < now),
+          )
+        : [];
 
     const errors = collected.map((result) => result.error).filter((msg) => msg !== null);
 
@@ -416,6 +485,8 @@ export async function refreshCard(
         query,
         items: existing?.items ?? [],
         error: errors.join(" · "),
+        ...(existing?.ebayAt ? { ebayAt: existing.ebayAt } : {}),
+        checked: sources,
       };
       await writeJson(file(card.id), failed);
       return failed;
@@ -425,7 +496,7 @@ export async function refreshCard(
     // Les identifiants étant préfixés par la source, Vinted et eBay ne peuvent
     // pas se recouvrir ici.
     const best = new Map<string, PendingItem>();
-    for (const item of collected.flatMap((result) => result.items)) {
+    for (const item of [...collected.flatMap((result) => result.items), ...reused]) {
       const known = best.get(item.id);
       if (!known || item.score > known.score) best.set(item.id, item);
     }
@@ -463,6 +534,8 @@ export async function refreshCard(
       // l'instantané reste daté de maintenant — le signaler sans le traiter
       // comme un échec de collecte, sinon la carte serait rejouée en boucle.
       ...(errors.length + notes.length > 0 ? { partial: [...errors, ...notes].join(" · ") } : {}),
+      ...(ebayAt ? { ebayAt } : {}),
+      checked: sources,
     };
     await writeJson(file(card.id), snapshot);
     return snapshot;

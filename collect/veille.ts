@@ -127,6 +127,8 @@ interface SweepResult {
   errors: string[];
   /** Cartes où chaque source interrogée en direct a échoué, et la dernière erreur. */
   failures: Record<"vinted" | "ebay", { count: number; last: string | null }>;
+  /** Cartes où chaque source a été interrogée pour de bon. */
+  attempts: Record<"vinted" | "ebay", number>;
   /** Cartes cochées « CM » dans ce passage. */
   watched: number;
 }
@@ -139,6 +141,7 @@ async function sweep(startedAt: number, options: Options): Promise<SweepResult> 
     ebay: { count: 0, last: null },
   };
   let watchedCount = 0;
+  const attempts = { vinted: 0, ebay: 0 };
 
   // Les requêtes que `collect/lbc.py` jouera à son prochain passage. Déposées
   // ici parce que la veille tourne au même quart d'heure et tient déjà l'union
@@ -183,6 +186,8 @@ async function sweep(startedAt: number, options: Options): Promise<SweepResult> 
         ["vinted", "Vinted : "],
         ["ebay", "eBay : "],
       ] as const) {
+        // eBay n'est interrogé que pour les cartes qui y sont dues.
+        if (snapshot.checked?.includes(source) ?? true) attempts[source] += 1;
         const at = problems.indexOf(label);
         if (at < 0) continue;
         failures[source].count += 1;
@@ -199,7 +204,7 @@ async function sweep(startedAt: number, options: Options): Promise<SweepResult> 
     if (index < cards.length - 1) await sleep(BETWEEN_CARDS_MS);
   }
 
-  return { cards: cards.length, errors, failures, watched: watchedCount };
+  return { cards: cards.length, errors, failures, attempts, watched: watchedCount };
 }
 
 /* ------------------------------------------------------------------ santé */
@@ -215,9 +220,14 @@ async function observe(
   now: number,
 ): Promise<Partial<Record<HealthSource, Observation>>> {
   const observed: Partial<Record<HealthSource, Observation>> = {
-    vinted: observeFromCards(result.failures.vinted.count, result.cards, result.failures.vinted.last),
+    vinted: observeFromCards(
+      result.failures.vinted.count,
+      result.attempts.vinted,
+      result.failures.vinted.last,
+    ),
+    // Un passage sans aucune carte due sur eBay ne dit rien d'eBay.
     ebay: hasEbay()
-      ? observeFromCards(result.failures.ebay.count, result.cards, result.failures.ebay.last)
+      ? observeFromCards(result.failures.ebay.count, result.attempts.ebay, result.failures.ebay.last)
       : null,
   };
 
