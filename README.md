@@ -802,6 +802,15 @@ qu'un navigateur : le second attend le verrou puis trouve une session de moins d
 contente. Sans `VINTED_PYTHON`, le site se sert du fichier tel quel et dit, quand il manque, de
 lancer `python collect/vinted_session.py` à la main.
 
+Le profil persistant a sa contrepartie : il garde aussi le jeton de la veille. Le 24 septembre 2026,
+celui du profil de la tablette a expiré sans que rien ne le remarque. L'amorceur le relisait à chaque
+passage et écrivait « session ouverte, valable jusqu'au 24/09 », et le catalogue l'acceptait encore.
+Le 30 au soir, Vinted a cessé de le tolérer : la page tournait sur « Session refresh », 115 échecs
+d'affilée, et Vinted a manqué au fil pendant un jour. Avec un profil vierge, la session s'ouvrait du
+premier coup. L'amorceur efface donc les deux jetons (`access_token_web`, `refresh_token_web`) avant
+chaque visite, refuse un jeton déjà périmé, et réessaie une fois sans aucun cookie Vinted si rien
+n'est venu.
+
 Ce que le nouveau catalogue ne donne plus : **la date de mise en ligne**. L'ancien la laissait
 deviner par l'horodatage de la photo ; le nouveau ne le porte plus. `createdAt` reste `null` pour
 Vinted — le tri « nouveautés » repose sur `newest_first` côté Vinted et sur `firstSeen` côté fil,

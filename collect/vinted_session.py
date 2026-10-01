@@ -58,6 +58,7 @@ import argparse
 import base64
 import json
 import os
+import re
 import sys
 import time
 import uuid
@@ -80,6 +81,13 @@ for _stream in (sys.stdout, sys.stderr):
 PARIS = ZoneInfo("Europe/Paris")
 ACCUEIL = "https://www.vinted.fr/"
 JETON = "access_token_web"
+# Les deux jetons de la session précédente. On vient en chercher des neufs :
+# les garder ne rapporte rien, et un jeton périmé dans le profil suffit à
+# enfermer la page dans « Session refresh » — vu du 30 septembre au 1er
+# octobre 2026, 115 échecs d'affilée, Vinted absent du fil un jour entier.
+# Un profil vierge rendait un jeton neuf du premier coup.
+JETONS_ANCIENS = (JETON, "refresh_token_web")
+DOMAINE = re.compile(r"(^|\.)vinted\.fr$")
 
 # Le jeton arrive avec la page ; on lui laisse tout de même quelques secondes,
 # le temps que les scripts de la page le posent si le serveur ne l'a pas fait.
@@ -203,6 +211,24 @@ def bloquer_le_superflu(route) -> None:
         route.continue_()
 
 
+def attendre_jeton(ctx, page) -> dict[str, str]:
+    """Les cookies Vinted, une fois le jeton posé — et pas n'importe lequel :
+    un jeton déjà expiré n'est pas une session. Il est alors retiré, et la
+    clé `__perime` dit pourquoi on rentre bredouille."""
+    deadline = time.time() + JETON_WAIT_S
+    jar: dict[str, str] = {}
+    while time.time() < deadline:
+        jar = {c["name"]: c["value"] for c in ctx.cookies() if DOMAINE.search(c.get("domain", ""))}
+        if JETON in jar:
+            exp = jwt_expiry(jar[JETON])
+            if exp is not None and exp <= time.time():
+                del jar[JETON]
+                return {**jar, "__perime": "1"}
+            return jar
+        page.wait_for_timeout(1000)
+    return jar
+
+
 def ouvrir_session(visible: bool, headless: bool, verbose: bool) -> dict | None:
     """Visite l'accueil dans un navigateur et rend la session obtenue, ou
     `None` si le jeton n'est pas venu (défi Cloudflare non levé, réseau)."""
@@ -218,22 +244,28 @@ def ouvrir_session(visible: bool, headless: bool, verbose: bool) -> dict | None:
         ctx.route("**/*", bloquer_le_superflu)
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
         defi = Defi(page, trace, auto=auto, visible=visible)
-        if not defi.franchir(ACCUEIL):
-            trace("défi Cloudflare non levé")
-            return None
-        if defi.leves and verbose:
-            print(f"  {defi.leves} défi(s) levé(s)", file=sys.stderr)
 
-        deadline = time.time() + JETON_WAIT_S
-        cookies: list[dict] = []
-        while time.time() < deadline:
-            cookies = [c for c in ctx.cookies() if "vinted.fr" in c.get("domain", "")]
-            if any(c["name"] == JETON for c in cookies):
+        # Premier essai sans les jetons d'hier ; s'il échoue encore, sans
+        # aucun cookie Vinted — un profil vierge, Cloudflare compris.
+        jar: dict[str, str] = {}
+        for essai in (1, 2):
+            if essai == 1:
+                for nom in JETONS_ANCIENS:
+                    ctx.clear_cookies(name=nom, domain=DOMAINE)
+            else:
+                ctx.clear_cookies(domain=DOMAINE)
+            if not defi.franchir(ACCUEIL):
+                trace("défi Cloudflare non levé")
+                return None
+            if defi.leves and verbose:
+                print(f"  {defi.leves} défi(s) levé(s)", file=sys.stderr)
+            jar = attendre_jeton(ctx, page)
+            if JETON in jar:
                 break
-            page.wait_for_timeout(1000)
-        jar = {c["name"]: c["value"] for c in cookies}
+            raison = "jeton périmé" if jar.get("__perime") else "aucun jeton reçu"
+            suite = ", nouvel essai sans cookies" if essai == 1 else ""
+            trace(f"{raison} (titre : {page.title()[:60]!r}){suite}")
         if JETON not in jar:
-            trace(f"aucun jeton reçu (titre : {page.title()[:60]!r})")
             return None
 
         now = int(time.time())
