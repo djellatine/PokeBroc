@@ -635,3 +635,26 @@ describe("scoreItem — cote du bon tirage", () => {
     assert.equal(scored.trend, 100);
   });
 });
+
+describe("englishQuery — carte anglaise", () => {
+  const CHARIZARD_EN: CardDetail = {
+    id: "en:base4-4",
+    localId: "4",
+    name: "Dracaufeu",
+    nameEn: "Charizard",
+    lang: "en",
+    set: { id: "base4", name: "Base Set 2", cardCount: { official: 130, total: 130 } },
+  };
+
+  it("cherche aussi sous le nom imprimé", () => {
+    assert.equal(englishQuery(CHARIZARD_EN), "Charizard 4/130");
+    const queries = suggestedQueries(CHARIZARD_EN).map((entry) => entry.query);
+    assert.ok(queries.includes("Dracaufeu 4/130"));
+    assert.ok(queries.includes("Charizard 4/130"));
+  });
+
+  it("reconnaît une annonce titrée en anglais", () => {
+    const scored = scoreItem(makeItem({ title: "Charizard 4/130 Base Set 2 holo" }), CHARIZARD_EN);
+    assert.ok(scored.match.score >= STRONG_SCORE);
+  });
+});

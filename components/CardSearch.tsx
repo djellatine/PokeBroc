@@ -375,11 +375,25 @@ export default function CardSearch({
                     <div className="px-1.5 py-1.5">
                       <p
                         className="truncate text-[11px] font-semibold"
-                        title={card.nameJa ? `${card.name} · ${card.nameJa}` : card.name}
+                        title={
+                          card.nameJa
+                            ? `${card.name} · ${card.nameJa}`
+                            : card.lang === "en" && card.nameEn !== card.name
+                              ? `${card.name} · ${card.nameEn}`
+                              : card.name
+                        }
                       >
                         {card.name}
                         {card.lang === "ja" && (
                           <span className="ml-1 font-normal text-rose-300">JP</span>
+                        )}
+                        {card.lang === "en" && (
+                          <span
+                            className="ml-1 font-normal text-sky-300"
+                            title="Extension jamais sortie en français"
+                          >
+                            EN
+                          </span>
                         )}
                       </p>
                       <p className="truncate text-[10px] text-faint" title={card.setName ?? ""}>

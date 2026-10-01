@@ -767,8 +767,10 @@ export function bestQuery(card: CardDetail): string {
 }
 
 /**
- * La même requête, sous le nom anglais — pour les cartes japonaises, et
- * seulement quand il diffère du français.
+ * La même requête, sous le nom anglais — pour les cartes japonaises et
+ * anglaises, et seulement quand il diffère du français. Une carte anglaise
+ * se vend en France sous l'un comme l'autre : « Dracaufeu Base Set 2 »,
+ * « Charizard 4/130 ».
  *
  * Mesuré le 3 septembre 2026 sur la Carapuce McDonald's de 2002 (007/018) :
  * « Carapuce 007/018 » ne rend aucune annonce de la carte, ni sur Vinted ni
@@ -779,12 +781,12 @@ export function bestQuery(card: CardDetail): string {
  * Pikachu s'appelle Pikachu partout, une Dresseur n'a pas de nom anglais.
  */
 export function englishQuery(card: CardDetail): string | null {
-  if (card.lang !== "ja" || !card.nameEn) return null;
+  if (!card.lang || !card.nameEn) return null;
   const english = searchName({ ...card, name: card.nameEn });
   if (normalize(english) === normalize(searchName(card))) return null;
   const printed = cardNumber(card);
   if (printed) return `${english} ${printed}`;
-  return `${english} japanese pokemon card`;
+  return card.lang === "ja" ? `${english} japanese pokemon card` : `${english} pokemon card`;
 }
 
 /**
@@ -855,6 +857,8 @@ export function suggestedQueries(card: CardDetail): { label: string; query: stri
   if (card.rarity && /rare|secret|ultra|arc|holo/i.test(card.rarity)) {
     out.push({ label: `Nom + ${card.rarity}`, query: `${name} ${card.rarity}` });
   }
+  const english = englishQuery(card);
+  if (english) out.push({ label: "Nom anglais", query: english });
 
   const seen = new Set<string>();
   return out.filter((entry) => {

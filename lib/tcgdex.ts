@@ -11,6 +11,11 @@
  * module ait à porter une langue. Il évite au passage une collision réelle :
  * les identifiants japonais (« SV8a ») ne se distinguent des français
  * (« sv8a ») que par la casse, que Windows ignore dans les noms de fichiers.
+ *
+ * La base anglaise, enfin, pour les extensions jamais sorties en français —
+ * Legendary Treasures, Skyridge, Base Set 2… Même mécanisme, préfixe `en:`.
+ * Ses cartes se mêlent aux françaises dans la recherche, sans bascule : c'est
+ * la seule version qui existe, il n'y a pas à choisir.
  */
 
 const API = "https://api.tcgdex.net/v2";
@@ -18,6 +23,8 @@ const API = "https://api.tcgdex.net/v2";
 type Lang = "fr" | "en" | "ja";
 
 export const JA_PREFIX = "ja:";
+/** Carte d'une extension sortie en anglais et jamais en français. */
+export const EN_PREFIX = "en:";
 /**
  * Carte japonaise venue de Bulbapedia et non de TCGdex — voir
  * `lib/bulbapedia.ts`. Défini ici, et non là-bas, parce que ce fichier est le
@@ -33,11 +40,16 @@ export function isJapaneseId(cardId: string): boolean {
   return cardId.startsWith(JA_PREFIX) || cardId.startsWith(JB_PREFIX);
 }
 
+/** Carte anglaise, d'une extension que la France n'a jamais eue. */
+export function isEnglishId(cardId: string): boolean {
+  return cardId.startsWith(EN_PREFIX);
+}
+
 /** Langue et identifiant tels que TCGdex les attend. */
 function locate(cardId: string): { lang: Lang; id: string } {
-  return cardId.startsWith(JA_PREFIX)
-    ? { lang: "ja", id: cardId.slice(JA_PREFIX.length) }
-    : { lang: "fr", id: cardId };
+  if (cardId.startsWith(JA_PREFIX)) return { lang: "ja", id: cardId.slice(JA_PREFIX.length) };
+  if (cardId.startsWith(EN_PREFIX)) return { lang: "en", id: cardId.slice(EN_PREFIX.length) };
+  return { lang: "fr", id: cardId };
 }
 
 export interface CardBrief {
@@ -88,14 +100,17 @@ export interface CardDetail extends CardBrief {
   variants?: Record<string, boolean>;
   pricing?: { cardmarket?: CardMarketPricing | null; tcgplayer?: unknown };
   /**
-   * Carte de la base japonaise. Absent pour une carte française : le champ
-   * n'existe que là où il change quelque chose — la notation, les requêtes,
-   * la pastille dans le fil.
+   * Carte de la base japonaise, ou anglaise. Absent pour une carte française :
+   * le champ n'existe que là où il change quelque chose — la notation, les
+   * requêtes, la pastille dans le fil.
    */
-  lang?: "ja";
+  lang?: "ja" | "en";
   /** Nom imprimé, en japonais ; `name` porte alors la traduction française. */
   nameJa?: string;
-  /** Nom anglais, que certains vendeurs préfèrent : « Leafeon ex ». */
+  /**
+   * Nom anglais, que certains vendeurs préfèrent : « Leafeon ex ». Pour une
+   * carte anglaise, c'est le nom imprimé, et `name` sa traduction.
+   */
   nameEn?: string;
   /** Tirages de la carte, avec leurs identifiants chez les marchands. */
   variants_detailed?: {
@@ -286,13 +301,21 @@ function normalize(value: string): string {
  * Classe les résultats : correspondance exacte, puis début de nom, puis le reste.
  * Les cartes sans visuel passent en dernier (elles sont inexploitables dans une grille).
  */
-function rank<T extends CardBrief>(cards: T[], query: string): T[] {
+function rank<T extends CardBrief & { nameEn?: string }>(cards: T[], query: string): T[] {
   const q = normalize(query);
+  // Une carte anglaise se range aussi sous son nom imprimé : « charizard »
+  // désigne exactement la Charizard de Base Set 2, affichée « Dracaufeu ».
+  const scoreOf = (card: T) =>
+    Math.min(
+      ...[card.name, card.nameEn ?? card.name].map((name) => {
+        const n = normalize(name);
+        return n === q ? 0 : n.startsWith(q) ? 1 : 2;
+      }),
+    );
   return [...cards].sort((a, b) => {
     const na = normalize(a.name);
     const nb = normalize(b.name);
-    const scoreOf = (n: string) => (n === q ? 0 : n.startsWith(q) ? 1 : 2);
-    const byScore = scoreOf(na) - scoreOf(nb);
+    const byScore = scoreOf(a) - scoreOf(b);
     if (byScore !== 0) return byScore;
     const byImage = Number(Boolean(b.image)) - Number(Boolean(a.image));
     if (byImage !== 0) return byImage;
@@ -346,8 +369,9 @@ function describe(error: unknown): string {
 export interface CardListItem extends CardBrief {
   setId: string | null;
   setName: string | null;
-  lang?: "ja";
+  lang?: "ja" | "en";
   nameJa?: string;
+  nameEn?: string;
 }
 
 /** L'identifiant d'une carte est de la forme `{setId}-{localId}`. */
@@ -465,7 +489,11 @@ export async function searchCards(
   if (q.length < 2) return [];
   if (lang === "ja") return searchJapanese(q, limit);
 
-  const [direct, sets] = await Promise.all([fetchByName(q), getSetsIndex()]);
+  const [direct, sets, english] = await Promise.all([
+    fetchByName(q),
+    getSetsIndex(),
+    getSetsIndex().then((french) => searchEnglishOnly(q, french)),
+  ]);
 
   let cards = direct;
   // La saisie porte déjà des accents : inutile d'en tester d'autres.
@@ -483,12 +511,52 @@ export async function searchCards(
     }
   }
 
-  return rank(cards, q)
-    .slice(0, limit)
-    .map((card) => {
-      const setId = setIdOf(card.id);
-      return { ...card, setId, setName: setId ? (sets.get(setId)?.name ?? null) : null };
+  const french: CardListItem[] = cards.map((card) => {
+    const setId = setIdOf(card.id);
+    return { ...card, setId, setName: setId ? (sets.get(setId)?.name ?? null) : null };
+  });
+  return rank([...french, ...english], q).slice(0, limit);
+}
+
+/* --------------------------------------------------------------- anglais */
+
+/**
+ * Cartes des extensions que TCGdex n'a qu'en anglais — celles qui ne sont
+ * jamais sorties en France.
+ *
+ * Mesuré le 1er octobre 2026 : 21 extensions sur 220, dont Base Set 2,
+ * Legendary Collection, Skyridge et Legendary Treasures (plus de 1 300
+ * cartes). La liste n'est écrite nulle part : c'est la différence entre les
+ * deux index d'extensions, qui suivra TCGdex. Sans index français — panne du
+ * catalogue — on ne rend rien, faute de pouvoir écarter les extensions que la
+ * base française a déjà, sous leur nom français.
+ */
+async function searchEnglishOnly(
+  q: string,
+  french: Map<string, SetSummary>,
+): Promise<CardListItem[]> {
+  if (french.size === 0) return [];
+  const [{ englishCandidates, translateEnglishName }, sets] = await Promise.all([
+    import("./english"),
+    getSetsIndex("en"),
+  ]);
+  const lists = await Promise.all(englishCandidates(q).map((name) => fetchByName(name, "en")));
+
+  const byId = new Map<string, CardListItem>();
+  for (const card of lists.flat()) {
+    const setId = setIdOf(card.id);
+    if (!setId || french.has(setId) || !sets.has(setId)) continue;
+    byId.set(card.id, {
+      ...card,
+      id: EN_PREFIX + card.id,
+      name: translateEnglishName(card.name),
+      nameEn: card.name,
+      lang: "en",
+      setId,
+      setName: sets.get(setId)?.name ?? null,
     });
+  }
+  return [...byId.values()];
 }
 
 /* -------------------------------------------------------------- japonais */
@@ -585,7 +653,9 @@ export async function fetchCardDetail(
   const { lang, id } = locate(cardId);
   try {
     const card = await tcgdex<CardDetail>(`/cards/${encodeURIComponent(id)}`, 3600, lang);
-    return { card: lang === "ja" ? await japaneseCard(card) : card, error: null };
+    const shaped =
+      lang === "ja" ? await japaneseCard(card) : lang === "en" ? await englishCard(card) : card;
+    return { card: shaped, error: null };
   } catch (error) {
     if (error instanceof TcgdexHttpError && error.status === 404) return { card: null, error: null };
     return { card: null, error: describe(error) };
@@ -642,6 +712,20 @@ async function japaneseCard(raw: CardDetail): Promise<CardDetail> {
   };
 }
 
+/** Carte anglaise telle que le reste du site la lit : nom français, nom imprimé à côté. */
+async function englishCard(raw: CardDetail): Promise<CardDetail> {
+  const { translateEnglishName } = await import("./english");
+  const image = fallbackImage(raw);
+  return {
+    ...raw,
+    id: EN_PREFIX + raw.id,
+    lang: "en",
+    name: translateEnglishName(raw.name),
+    nameEn: raw.name,
+    ...(image ? { image } : {}),
+  };
+}
+
 /**
  * Résout le visuel d'une carte, en se rabattant sur la base anglaise.
  *
@@ -662,7 +746,8 @@ export async function resolveCardImage(
 ): Promise<{ image: string; lang: "fr" | "en" | "ja" } | null> {
   const found = await getCard(cardId);
   if (found?.image) return { image: found.image, lang: found.lang ?? "fr" };
-  if (isJapaneseId(cardId)) return null;
+  // Une anglaise vient déjà de la base anglaise : aucun repli à chercher là.
+  if (isJapaneseId(cardId) || isEnglishId(cardId)) return null;
 
   try {
     const res = await fetch(`${API}/en/cards/${encodeURIComponent(cardId)}`, {

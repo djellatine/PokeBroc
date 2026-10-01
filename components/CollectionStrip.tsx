@@ -7,7 +7,7 @@ import CardThumb from "@/components/CardThumb";
 import { JapaneseChip } from "@/components/OfferRow";
 import { plural } from "@/lib/format";
 import type { FavoriteCard } from "@/lib/store";
-import { isJapaneseId } from "@/lib/tcgdex";
+import { isEnglishId, isJapaneseId } from "@/lib/tcgdex";
 
 /**
  * Bandeau de la collection.
@@ -263,10 +263,11 @@ export default function CollectionStrip({
               {/* Surveiller aussi cette carte sur Cardmarket. Ouvre un menu pour
                   cocher reverse / 1ère édition. Toujours visible quand c'est
                   actif — un état à retrouver d'un coup d'œil — et révélé au
-                  survol sinon, comme la croix. Pas pour une carte japonaise :
-                  le collecteur Cardmarket résout ses pages depuis la base
-                  française, et impose la langue française à ses recherches. */}
-              {!isJapaneseId(favorite.cardId) && (
+                  survol sinon, comme la croix. Pas pour une carte japonaise
+                  ni anglaise : le collecteur Cardmarket résout ses pages
+                  depuis la base française, et impose la langue française à
+                  ses recherches. */}
+              {!isJapaneseId(favorite.cardId) && !isEnglishId(favorite.cardId) && (
               <button
                 type="button"
                 onClick={(event) => openMenu(favorite.cardId, event)}

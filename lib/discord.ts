@@ -12,7 +12,7 @@
 
 import { offerText, MAX_ALERTS, type AlertGroup } from "./alerts";
 import { plural } from "./format";
-import { cardImage, isJapaneseId } from "./tcgdex";
+import { cardImage, isEnglishId, isJapaneseId } from "./tcgdex";
 
 /** Discord accepte au plus dix embeds par message. */
 const MAX_EMBEDS = 10;
@@ -66,7 +66,11 @@ export function buildEmbeds(groups: AlertGroup[], max = MAX_ALERTS): DiscordEmbe
     // Le drapeau dit d'un coup d'œil qu'on parle de la version japonaise : sans
     // lui, « Pikachu · 001 » et « Pikachu · 25 » se lisent pareil sur un
     // téléphone.
-    const flag = isJapaneseId(group.card.cardId) ? "🇯🇵 " : "";
+    const flag = isJapaneseId(group.card.cardId)
+      ? "🇯🇵 "
+      : isEnglishId(group.card.cardId)
+        ? "🇬🇧 "
+        : "";
     const name = group.card.localId
       ? `${flag}${group.card.name} · ${group.card.localId}`
       : `${flag}${group.card.name}`;

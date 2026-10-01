@@ -397,6 +397,28 @@ Pikachu `001/SV-P` à −40 % arrive sur Discord avec un drapeau devant son nom.
 champ : la surveillance Cardmarket, dont le collecteur résout ses pages depuis la base française et
 impose la langue française — le bouton **CM** n'est pas proposé sur une japonaise.
 
+### Les extensions jamais sorties en français
+
+Chercher « Reshiram » ne trouvait pas celui de Legendary Treasures, et ce n'était pas un trou de
+TCGdex : l'extension n'est jamais sortie en français (traduite seulement dans le jeu en ligne). Elle
+n'existe que dans la base anglaise, que la recherche ne lisait pas. Mesuré le 1er octobre 2026,
+21 extensions sur 220 sont dans ce cas, plus de 1 300 cartes, dont des séries recherchées : Base Set 2,
+Gym Heroes, Gym Challenge, Southern Islands, Legendary Collection, Skyridge, EX Team Rocket Returns,
+Platine Arceus et Legendary Treasures. Le tableau des langues de Bulbapedia confirme qu'aucune n'a
+eu d'édition française. Le reste, ce sont des séries promo : POP 5, 6 et 8, McDonald's 2018 et 2019,
+Rumble, My First Battle…
+
+Ces cartes se mêlent désormais aux françaises dans la recherche ordinaire, sans bascule : c'est la
+seule version qui existe, il n'y a rien à choisir. La liste des extensions n'est écrite nulle part :
+c'est la différence entre les deux index d'extensions de TCGdex, qui suivra le catalogue. La saisie
+française est traduite par `lib/english.ts`, depuis la même table des espèces : « dracaufeu »
+interroge aussi « Charizard », et la carte s'affiche « Dracaufeu », nom anglais à côté. Seules les
+espèces sont traduites : « Dark Charizard » devient « Dark Dracaufeu », « Professor Oak » reste tel
+quel. Une carte anglaise porte le préfixe `en:` (`en:bw11-28`) et la pastille **EN**. La notation
+admet ses deux noms, comme pour une japonaise, et Vinted et eBay la cherchent aussi sous son nom
+anglais (`Charizard 4/130`). Comme les japonaises, elle n'a pas de bouton **CM** : le collecteur
+Cardmarket ne lit que la base française.
+
 ### Deux passes, systématiquement
 
 Vinted propose un tri par date, mais l'appliquer à une recherche floue revient à demander les
@@ -663,7 +685,8 @@ pour un fichier de 18 Ko**, des `502` par salves, et des requêtes qui n'aboutis
 
 ## Sources de données
 
-- **Cartes** : [TCGdex](https://tcgdex.dev) en français, sans clé d'API. Fournit aussi les cotes
+- **Cartes** : [TCGdex](https://tcgdex.dev) en français, sans clé d'API — en anglais pour les
+  extensions jamais sorties en France, en japonais pour la recherche **JP**. Fournit aussi les cotes
   Cardmarket.
 - **Annonces** : catalogue de Vinted (`api.vinted.fr/svc-catalogue/items`). Il n'est pas
   publiquement documenté et exige le cookie de session anonyme `access_token_web`, que seul un
@@ -1345,9 +1368,10 @@ lib/
   rate-limit.ts             seau à jetons en mémoire
   json-file.ts              lecture/écriture atomique, sérialisation par clé
   image-cache.ts            cache disque des visuels, préchauffage, purge
-  tcgdex.ts                 cartes, extensions, images, cotes — bases française et japonaise
+  tcgdex.ts                 cartes, extensions, images, cotes — bases française, japonaise, anglaise
   card-cache.ts             copie locale des fiches, pour une veille qui survit à un catalogue muet
   japanese.ts               noms japonais ↔ français, pour chercher et noter les cartes japonaises
+  english.ts                noms anglais ↔ français, pour les extensions jamais sorties en français
   bulbapedia.ts             second catalogue japonais : pages d'espèce et de carte de Bulbapedia
   pokedex-names.ts          table des espèces (ja, fr, en), générée depuis PokéAPI
   vinted.ts                 catalogue Vinted : session lue sur disque, throttle, cache, normalisation

@@ -5,7 +5,7 @@ import HideButton from "@/components/HideButton";
 import { CONDITION_LABELS } from "@/lib/match";
 import { age, countdown, euro, percent, plural } from "@/lib/format";
 import type { FeedCard, FeedItem } from "@/lib/feed";
-import { isJapaneseId } from "@/lib/tcgdex";
+import { isEnglishId, isJapaneseId } from "@/lib/tcgdex";
 // Depuis `lib/source` et non `lib/feed` : c'est une valeur, donc un import qui
 // survit à la compilation et entraîne tout le module dans le paquet client.
 import { SOURCE_NAMES, type Source } from "@/lib/source";
@@ -30,9 +30,20 @@ import { SOURCE_NAMES, type Source } from "@/lib/source";
 /**
  * Pastille « JP » d'une carte japonaise. Le fil mêle les deux versions d'un
  * même Pokémon, et « Pikachu n°001 » ne dit pas laquelle : la pastille, si.
- * Rend `null` pour une française — la majorité — pour ne rien ajouter là.
+ * « EN » pour une carte d'extension jamais sortie en français. Rend `null`
+ * pour une française — la majorité — pour ne rien ajouter là.
  */
 export function JapaneseChip({ cardId }: { cardId: string }) {
+  if (isEnglishId(cardId)) {
+    return (
+      <span
+        className="chip border-sky-400/40 text-sky-300"
+        title="Carte anglaise — extension jamais sortie en français"
+      >
+        EN
+      </span>
+    );
+  }
   if (!isJapaneseId(cardId)) return null;
   return (
     <span className="chip border-rose-400/40 text-rose-300" title="Carte japonaise">
