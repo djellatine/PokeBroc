@@ -835,7 +835,11 @@ n'est venu.
 Ce que le nouveau catalogue ne donne plus : **la date de mise en ligne**. L'ancien la laissait
 deviner par l'horodatage de la photo ; le nouveau ne le porte plus. `createdAt` reste `null` pour
 Vinted — le tri « nouveautés » repose sur `newest_first` côté Vinted et sur `firstSeen` côté fil,
-qui n'en a jamais dépendu. La marque et l'état, eux, ont migré dans les deux lignes de la vignette
+qui n'en a jamais dépendu. Le tri « Derniers ajouts » de l'accueil, lui, en dépendait : une annonce
+sans date y valait zéro, et le 1er octobre les 1 760 annonces Vinted non datées (sur 2 115) passaient
+toutes sous leboncoin et eBay — l'accueil semblait n'avoir plus de Vinted. Il retombe désormais sur
+`firstSeen`, jamais antérieur à la mise en ligne et juste au quart d'heure près pour une annonce
+neuve. Contrecoup assumé : après une panne, les annonces retrouvées remontent en tête un moment. La marque et l'état, eux, ont migré dans les deux lignes de la vignette
 (`item_box`), et les liens sont devenus relatifs.
 
 ### Pourquoi leboncoin passe par un script Python

@@ -405,10 +405,16 @@ export default function Dashboard({
 
     const scoped = selected ? kept.filter((item) => item.cardId === selected) : kept;
 
+    // Le nouveau catalogue Vinted ne donne plus de date de mise en ligne, sauf
+    // quand la photo porte un horodatage — mesuré le 1er octobre, 1 760
+    // annonces Vinted sur 2 115 sans date. Triées à 0, elles tombaient toutes
+    // sous leboncoin et eBay, et l'accueil semblait n'avoir plus de Vinted. À
+    // défaut, la date où nous l'avons croisée : jamais antérieure à la mise en
+    // ligne, et juste à un quart d'heure près pour une annonce neuve.
+    const postedAt = (item: FeedItem) => item.createdAt ?? item.firstSeen;
     const sorted = [...scoped].sort((a, b) => {
-      if (filters.sort === "date") return (b.createdAt ?? 0) - (a.createdAt ?? 0);
-      // Sans date connue, en dernier : une annonce sans date n'est pas ancienne.
-      if (filters.sort === "oldest") return (a.createdAt ?? Infinity) - (b.createdAt ?? Infinity);
+      if (filters.sort === "date") return postedAt(b) - postedAt(a);
+      if (filters.sort === "oldest") return postedAt(a) - postedAt(b);
       if (filters.sort === "price") {
         return (a.totalPrice ?? a.price ?? Infinity) - (b.totalPrice ?? b.price ?? Infinity);
       }
