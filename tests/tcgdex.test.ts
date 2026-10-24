@@ -10,6 +10,7 @@ import {
   cardmarketProductId,
   CARDMARKET_PREFIX,
   cardNumber,
+  directCardImage,
   fallbackImage,
   isJapaneseId,
   JA_PREFIX,
@@ -129,5 +130,23 @@ describe("printedKey", () => {
     assert.equal(printedKey("004", "018"), printedKey("004", 18));
     assert.equal(printedKey("052", "ADV-P"), printedKey("52", "adv-p"));
     assert.notEqual(printedKey("004", "018"), printedKey("004", "165"));
+  });
+});
+
+describe("directCardImage", () => {
+  it("laisse le navigateur joindre TCGdex et TCGplayer", () => {
+    assert.equal(
+      directCardImage("https://assets.tcgdex.net/fr/base/base1/2"),
+      "https://assets.tcgdex.net/fr/base/base1/2/low.webp",
+    );
+    assert.equal(
+      directCardImage(`${TCGPLAYER_PREFIX}587758`),
+      "https://product-images.tcgplayer.com/fit-in/437x437/587758.jpg",
+    );
+  });
+
+  it("garde Cardmarket derrière le proxy, faute de son Referer", () => {
+    assert.equal(directCardImage(`${CARDMARKET_PREFIX}sm9b/558126`), null);
+    assert.equal(directCardImage(undefined), null);
   });
 });

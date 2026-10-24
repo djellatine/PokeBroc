@@ -704,7 +704,7 @@ un domaine public.
 > vivant en mémoire. Pour un déploiement multi-instance, remplacez `lib/store.ts` : sa surface est
 > déjà asynchrone et ignore le support.
 
-## Les visuels de cartes passent par un cache local
+## Les visuels de cartes et leur cache local
 
 `assets.tcgdex.net` génère ses images à la demande. Mesuré pendant le développement : **15 à 25 s
 pour un fichier de 18 Ko**, des `502` par salves, et des requêtes qui n'aboutissent jamais.
@@ -724,7 +724,15 @@ pour un fichier de 18 Ko**, des `502` par salves, et des requêtes qui n'aboutis
 4. **Repli sur la base anglaise** — environ 13 % des cartes n'ont pas d'illustration côté français,
    et les deux tiers d'entre elles en ont une côté anglais. C'est la même illustration ; seul le
    texte imprimé change, illisible à la taille d'une vignette.
-5. **Purge** — au-delà de 300 Mo, les fichiers les plus anciens sont supprimés jusqu'à redescendre à
+5. **CDN d'abord, cache en secours** — mesuré le 24 octobre 2026, TCGdex répond désormais en 0,1 à
+   0,3 s : 24 vignettes en **0,34 s** en direct, contre plus d'une seconde par le proxy de la
+   tablette *même en cache*, chaque lecture disque passant par proot. `CardThumb` charge donc
+   l'image directement depuis `assets.tcgdex.net` ou TCGplayer (`directCardImage`), et ne bascule
+   sur `/api/carte-image` qu'en cas d'échec ou après 4 s sans réponse — le cache, préchauffé par la
+   recherche, reste prêt pour les mauvaises passes du CDN. Cardmarket (exige son `Referer`),
+   Bulbagarden et les cartes sans visuel français (résolues côté serveur) passent toujours par le
+   proxy.
+6. **Purge** — au-delà de 300 Mo, les fichiers les plus anciens sont supprimés jusqu'à redescendre à
    80 % du plafond. L'éviction se fait sur la date d'écriture : les visuels sont servis avec un
    `Cache-Control` immuable, donc une date de dernier accès ne voudrait pas dire grand-chose.
 
