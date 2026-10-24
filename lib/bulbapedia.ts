@@ -24,6 +24,7 @@
  * et les deux fonctions exportées en fin de fichier touchent le réseau.
  */
 
+import { curlGet } from "./curl";
 import { frenchSpeciesName, hasJapaneseScript, speciesCandidates } from "./japanese";
 import { normalize } from "./match";
 import { BULBA_USER_AGENT, JB_PREFIX } from "./tcgdex";
@@ -307,24 +308,54 @@ async function throttled<T>(task: () => Promise<T>): Promise<T> {
   }
 }
 
+/**
+ * Pages déjà lues, un jour durant. Le cache de `fetch` (`revalidate`) ne voit
+ * pas les lectures faites par `curl`, et une recherche relit les mêmes pages
+ * d'espèce à chaque frappe.
+ */
+const WIKITEXT_TTL_MS = 24 * 60 * 60 * 1000;
+const WIKITEXT_CACHE_MAX = 200;
+const wikitextCache = new Map<string, { at: number; text: string }>();
+
 async function fetchWikitext(page: string): Promise<string | null> {
+  const hit = wikitextCache.get(page);
+  if (hit && Date.now() - hit.at < WIKITEXT_TTL_MS) return hit.text;
+
   const url = `${API}?action=parse&page=${encodeURIComponent(page)}&prop=wikitext&format=json`;
-  return throttled(async () => {
+  const text = await throttled(async () => {
     try {
-      const res = await fetch(url, {
-        headers: { "User-Agent": BULBA_USER_AGENT, Accept: "application/json" },
-        next: { revalidate: 86400 },
-        // Un wiki de bénévoles a ses lenteurs ; passé vingt secondes, on
-        // considère la page injoignable plutôt que de bloquer la veille.
-        signal: AbortSignal.timeout(20_000),
-      });
-      if (!res.ok) return null;
-      const json = (await res.json()) as { parse?: { wikitext?: { "*": string } } };
+      // `curl` d'abord : Cloudflare refuse Node une fois sur deux (voir `lib/curl.ts`).
+      const viaCurl = await curlGet(url, { "User-Agent": BULBA_USER_AGENT, Accept: "application/json" });
+      let raw: string | null = null;
+      if (viaCurl) {
+        if (viaCurl.status === 200) raw = viaCurl.body.toString("utf8");
+        else if (viaCurl.status === 404) return null;
+      }
+      if (raw === null) {
+        const res = await fetch(url, {
+          headers: { "User-Agent": BULBA_USER_AGENT, Accept: "application/json" },
+          next: { revalidate: 86400 },
+          // Un wiki de bénévoles a ses lenteurs ; passé vingt secondes, on
+          // considère la page injoignable plutôt que de bloquer la veille.
+          signal: AbortSignal.timeout(20_000),
+        });
+        if (!res.ok) return null;
+        raw = await res.text();
+      }
+      const json = JSON.parse(raw) as { parse?: { wikitext?: { "*": string } } };
       return json.parse?.wikitext?.["*"] ?? null;
     } catch {
       return null;
     }
   });
+
+  if (text !== null) {
+    if (wikitextCache.size >= WIKITEXT_CACHE_MAX) {
+      wikitextCache.delete(wikitextCache.keys().next().value!);
+    }
+    wikitextCache.set(page, { at: Date.now(), text });
+  }
+  return text;
 }
 
 /** Ce que la recherche rend pour une carte Bulbapedia, avant mise en forme par `tcgdex.ts`. */

@@ -324,6 +324,13 @@ pas de cote — le fil montre ses annonces sans écart — et son visuel vient d
 Bulbagarden, que le cache local relaie aussi, en se présentant : le wiki refuse les clients
 anonymes, et on ne lui demande jamais plus de quatre pages à la fois.
 
+Depuis octobre 2026, Cloudflare oppose son défi « Just a moment… » à une bonne part des requêtes
+que Node envoie à Bulbagarden, pages comme images, quand `curl` passe à chaque fois avec les mêmes
+en-têtes (mesuré le 24 octobre : 7 sur 7 pour `curl`, 0 à 2 sur 5 pour Node, sur le PC comme sur la
+tablette). La moitié Bulbapedia de la recherche JP était muette : « rayquaza » rendait 21 cartes,
+sans aucune promo. Les deux passent donc par le `curl` du système (`lib/curl.ts`), `fetch` en
+secours, et les pages lues sont gardées un jour en mémoire — 92 cartes, promos PLAY comprises.
+
 Deux traits des cartes japonaises anciennes que la notation apprend au passage : le total
 s'imprime sur autant de chiffres que le numéro (« 004/018 », que « 004/18 » ne trouverait pas), et
 les cartes d'avant 2008 n'ont pas de numéro de collection du tout — elles se cherchent par le nom
@@ -1453,6 +1460,7 @@ lib/
   japanese.ts               noms japonais ↔ français, pour chercher et noter les cartes japonaises
   english.ts                noms anglais ↔ français, pour les extensions jamais sorties en français
   bulbapedia.ts             second catalogue japonais : pages d'espèce et de carte de Bulbapedia
+  curl.ts                   requêtes par le curl du système, pour Bulbagarden qui refuse Node
   pokedex-names.ts          table des espèces (ja, fr, en), générée depuis PokéAPI
   vinted.ts                 catalogue Vinted : session lue sur disque, throttle, cache, normalisation
   vinted-date.ts            date des annonces Vinted estimée par l'identifiant (le catalogue n'en donne plus)

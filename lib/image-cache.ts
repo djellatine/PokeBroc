@@ -10,6 +10,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { curlGet } from "./curl";
 import { BULBA_USER_AGENT, CARDMARKET_REFERER } from "./tcgdex";
 
 const DIR = path.join(process.cwd(), ".data", "img-cache");
@@ -112,6 +113,26 @@ export async function readCached(url: string): Promise<Buffer | null> {
 }
 
 /**
+ * Cloudflare oppose son défi à Node sur Bulbagarden, pas à `curl` (voir
+ * `lib/curl.ts`) : ces images-là passent par lui, `fetch` en secours.
+ */
+async function get(url: string): Promise<{ status: number; body: Buffer | null }> {
+  if (new URL(url).hostname === "archives.bulbagarden.net") {
+    const res = await curlGet(url, requestHeaders(url), {
+      timeoutMs: DOWNLOAD_TIMEOUT_MS,
+      maxBytes: MAX_BYTES,
+    });
+    if (res && res.status !== 403) return res;
+  }
+  const res = await fetch(url, {
+    headers: requestHeaders(url),
+    signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+    cache: "no-store",
+  });
+  return { status: res.status, body: res.ok ? Buffer.from(await res.arrayBuffer()) : null };
+}
+
+/**
  * Télécharge l'image et la range sur disque. Les appels concurrents sur la même
  * URL partagent le même téléchargement.
  */
@@ -123,19 +144,14 @@ export function download(url: string): Promise<Buffer | null> {
   const task = (async () => {
     await acquire();
     try {
-      const res = await fetch(url, {
-        headers: requestHeaders(url),
-        signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
-        cache: "no-store",
-      });
-      if (!res.ok) {
+      const { status, body } = await get(url);
+      if (status !== 200 || !body) {
         // 404/410 : l'image n'existe pas, inutile d'y revenir. Les autres codes
         // (502, 429…) traduisent un CDN en difficulté, donc un réessai a du sens.
-        if (res.status === 404 || res.status === 410) missing.set(url, Date.now());
+        if (status === 404 || status === 410) missing.set(url, Date.now());
         return null;
       }
 
-      const body = Buffer.from(await res.arrayBuffer());
       if (body.byteLength === 0 || body.byteLength > MAX_BYTES) return null;
 
       // Écriture atomique : une lecture concurrente ne voit jamais un fichier partiel.
