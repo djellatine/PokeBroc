@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { warm } from "@/lib/image-cache";
-import { cardImage, searchCards } from "@/lib/tcgdex";
+import { cardImage, resolveCardImage, searchCards } from "@/lib/tcgdex";
 
 export const runtime = "nodejs";
 
@@ -24,7 +24,18 @@ export async function GET(request: NextRequest) {
 
     // Sans attendre : le CDN travaille pendant que l'utilisateur lit les noms,
     // au lieu de démarrer seulement quand le navigateur réclame les vignettes.
-    warm(cards.slice(0, WARM_COUNT).map((card) => cardImage(card.image, "low")));
+    const shown = cards.slice(0, WARM_COUNT);
+    warm(shown.map((card) => cardImage(card.image, "low")));
+    // Les cartes sans visuel TCGdex — japonaises surtout, servies par TCGplayer,
+    // Cardmarket ou Bulbagarden — se résolvent carte par carte, toujours sans
+    // attendre : à froid elles coûtaient jusqu'à 1,2 s chacune devant
+    // l'utilisateur, 0,12 s une fois en cache.
+    for (const card of shown) {
+      if (card.image) continue;
+      void resolveCardImage(card.id)
+        .then((resolved) => resolved && warm([cardImage(resolved.image, "low")]))
+        .catch(() => undefined);
+    }
 
     return Response.json({ cards, query });
   } catch (error) {

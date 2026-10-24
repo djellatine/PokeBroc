@@ -243,11 +243,6 @@ async function cardmarketImage(setId: string, idProduct: number): Promise<string
 export const CARDMARKET_REFERER = "https://www.cardmarket.com/";
 
 /**
- * Même visuel, mais servi par notre cache local (`app/api/carte-image`).
- * Le CDN TCGdex est trop lent et trop instable pour être appelé directement
- * depuis le navigateur.
- */
-/**
  * Hôtes que le navigateur peut joindre lui-même. Mesuré le 24 octobre 2026 :
  * TCGdex livre 24 vignettes en 0,34 s, quand le proxy de la tablette en met
  * plus d'une même déjà en cache — chaque lecture disque passe par proot.
@@ -266,6 +261,10 @@ export function directCardImage(
   return DIRECT_HOSTS.has(new URL(src).hostname) ? src : null;
 }
 
+/**
+ * Même visuel, mais servi par notre cache local (`app/api/carte-image`) : le
+ * repli de `CardThumb` quand le CDN échoue ou traîne.
+ */
 export function cachedCardImage(
   image: string | undefined,
   quality: "low" | "high" = "low",
